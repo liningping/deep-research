@@ -1194,7 +1194,7 @@ Return the updated summary as plain text:
     }
 
 
-def reflect_on_report(state: SummaryState, config: Dict[str, Any]) -> Dict[str, Any]:
+def reflect_on_report(state: SummaryState, config: RunnableConfig) -> Dict[str, Any]:
     """
     Reflect on the current research report and decide if further research is needed.
     This function analyzes the current research, identifies knowledge gaps,

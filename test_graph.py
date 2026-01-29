@@ -1,4 +1,5 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 from src.graph import graph
 from src.configuration import Configuration, LLMProvider, SearchAPI
@@ -9,7 +10,7 @@ load_dotenv()
 # Debug: print SEARCH_API value from environment
 print(f"Debug - SEARCH_API from env: '{os.getenv('SEARCH_API')}'")
 
-def test_graph():
+async def test_graph():
     # Configure the graph
     # Get MAX_WEB_RESEARCH_LOOPS with better error handling
     max_loops_str = os.getenv("MAX_WEB_RESEARCH_LOOPS", "10")
@@ -38,7 +39,11 @@ def test_graph():
     # Run the graph
     # Add recursion_limit to the config (outside of 'configurable')
     config["recursion_limit"] = 50
-    result = graph.invoke({"research_topic": research_topic}, config=config)
+    result = await graph.ainvoke({
+        "research_topic": research_topic,
+        "llm_provider": config["configurable"]["llm_provider"],
+        "llm_model": config["configurable"]["llm_model"],
+    }, config=config)
     
     print(f"\n{'='*80}")
     print("--- Research Complete ---")
@@ -46,4 +51,4 @@ def test_graph():
     print(result.get("running_summary", "No summary generated"))
 
 if __name__ == "__main__":
-    test_graph()
+    asyncio.run(test_graph())

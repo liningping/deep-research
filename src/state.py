@@ -25,7 +25,7 @@ class SummaryState(BaseModel):
     """
 
     research_topic: str = Field(description="The main research topic")
-    search_query: str = Field(description="Current search query")
+    search_query: str = Field(default="", description="Current search query")
     running_summary: str = Field(default="", description="Running summary of research")
     research_complete: bool = Field(
         default=False, description="Whether research is complete"
@@ -265,6 +265,9 @@ class SummaryState(BaseModel):
             pass
 
     def __init__(self, **data):
+        # Auto-fill search_query from research_topic if not provided
+        if not data.get("search_query") and data.get("research_topic"):
+            data["search_query"] = data["research_topic"]
         super().__init__(**data)
 
         # CRITICAL DEBUG: Check what we receive
