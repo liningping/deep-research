@@ -109,9 +109,9 @@ try:
     from routers.simple_steering_api import router as simple_steering_router
 
     app.include_router(simple_steering_router)
-    logger.info("✅ Simple steering API enabled")
+    logger.info("[OK] Simple steering API enabled")
 except ImportError as e:
-    logger.warning(f"⚠️ Simple steering API not available: {e}")
+    logger.warning(f"[WARN] Simple steering API not available: {e}")
 
 
 # Mount the React build directory
