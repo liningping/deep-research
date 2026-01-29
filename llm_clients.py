@@ -24,6 +24,7 @@ from langchain_google_vertexai import ChatVertexAI
 # API keys for different providers
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SFR_GATEWAY_API_KEY = os.getenv("SFR_GATEWAY_API_KEY")
 SAMBNOVA_API_KEY = os.getenv("SAMBNOVA_API_KEY")
@@ -1190,7 +1191,7 @@ def get_llm_client(provider, model_name=None):
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is not set in environment")
         api_key = OPENAI_API_KEY
-        base_url = os.getenv("OPENAI_BASE_URL")
+        base_url = OPENAI_BASE_URL
         if not model_name:
             model_name = MODEL_CONFIGS["openai"]["default_model"]
 
@@ -1350,6 +1351,7 @@ async def get_async_llm_client(provider, model_name=None):
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is not set in environment")
         api_key = OPENAI_API_KEY
+        base_url = OPENAI_BASE_URL
 
         # Always use standard ChatOpenAI async client
         # Strip -reasoning suffix if present, and handle o4-mini-high
@@ -1364,6 +1366,7 @@ async def get_async_llm_client(provider, model_name=None):
         return ChatOpenAI(
             model_name=effective_model_name,
             api_key=api_key,
+            base_url=base_url,
             max_tokens=OPENAI_MAX_TOKENS,  # Using variable instead of hardcoded value
             streaming=False,  # Keep false unless streaming needed in async context
         )

@@ -125,34 +125,34 @@ app.mount(
 )
 
 
-@app.get("/")
-async def root():
-    """Root endpoint that returns basic API information."""
-    return {
-        "message": "Deep Research API is running",
-        "version": VERSION,
-        "endpoints": {
-            "POST /deep-research": "Perform deep research on a topic with optional steering",
-            "POST /api/files/upload": "Upload and analyze files",
-            "GET /api/files/{file_id}/analysis": "Get file analysis results",
-            "POST /api/database/upload": "Upload database files for text2sql",
-            "GET /api/database/list": "List uploaded databases",
-            "GET /api/database/{database_id}/schema": "Get database schema",
-            "POST /api/database/query": "Execute text2sql queries",
-            "DELETE /api/database/{database_id}": "Delete uploaded database",
-            "POST /steering/message": "Send steering messages during research",
-            "GET /steering/plan/{session_id}": "Get current research plan",
-        },
-        "documentation": "/docs",
-    }
+# @app.get("/")
+# async def root():
+#     """Root endpoint that returns basic API information."""
+#     return {
+#         "message": "Deep Research API is running",
+#         "version": VERSION,
+#         "endpoints": {
+#             "POST /deep-research": "Perform deep research on a topic with optional steering",
+#             "POST /api/files/upload": "Upload and analyze files",
+#             "GET /api/files/{file_id}/analysis": "Get file analysis results",
+#             "POST /api/database/upload": "Upload database files for text2sql",
+#             "GET /api/database/list": "List uploaded databases",
+#             "GET /api/database/{database_id}/schema": "Get database schema",
+#             "POST /api/database/query": "Execute text2sql queries",
+#             "DELETE /api/database/{database_id}": "Delete uploaded database",
+#             "POST /steering/message": "Send steering messages during research",
+#             "GET /steering/plan/{session_id}": "Get current research plan",
+#         },
+#         "documentation": "/docs",
+#     }
 
 
-@app.get("/{path:path}")
-async def serve_react(path: str):
-    """Catch-all route for React app"""
-    if path.startswith("api/") or path.startswith("steering/"):
-        raise HTTPException(status_code=404, detail="API route not found")
-    return FileResponse("ai-research-assistant/build/index.html")
+# @app.get("/{path:path}")
+# async def serve_react(path: str):
+#     """Catch-all route for React app"""
+#     if path.startswith("api/") or path.startswith("steering/"):
+#         raise HTTPException(status_code=404, detail="API route not found")
+#     return FileResponse("ai-research-assistant/build/index.html")
 
 
 if __name__ == "__main__":
