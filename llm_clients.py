@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import LangChain and provider-specific packages
-from langchain.schema import HumanMessage, SystemMessage
-from langchain.schema.messages import ChatMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import ChatMessage
 from langchain.chat_models.base import BaseChatModel
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -1190,6 +1190,7 @@ def get_llm_client(provider, model_name=None):
         if not OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is not set in environment")
         api_key = OPENAI_API_KEY
+        base_url = os.getenv("OPENAI_BASE_URL")
         if not model_name:
             model_name = MODEL_CONFIGS["openai"]["default_model"]
 
@@ -1221,6 +1222,7 @@ def get_llm_client(provider, model_name=None):
                     "-reasoning", ""
                 ),  # Use base model name if reasoning specified
                 api_key=api_key,
+                base_url=base_url,
                 max_tokens=OPENAI_MAX_TOKENS,  # Using variable instead of hardcoded value
                 streaming=False,
             )

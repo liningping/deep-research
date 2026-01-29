@@ -7,7 +7,7 @@ import datetime
 import base64
 import os
 from tenacity import retry, stop_after_attempt, wait_exponential
-from langchain.schema import HumanMessage
+from langchain_core.messages import HumanMessage
 import json
 import urllib.parse  # Added for extract_domain
 
