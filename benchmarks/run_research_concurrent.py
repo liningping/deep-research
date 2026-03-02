@@ -1188,7 +1188,7 @@ async def process_tasks_concurrently(
 
 
 # ==================== Helper Functions ====================
-def get_default_file_paths(benchmark_type: str) -> Dict[str, str]:
+def get_default_file_paths(benchmark_type: str, model_name: str = 'gemini') -> Dict[str, str]:
     """Get default file paths for different benchmarks."""
     # Script directory (benchmarks repos should be cloned here)
     script_dir = Path(__file__).parent
@@ -1203,7 +1203,7 @@ def get_default_file_paths(benchmark_type: str) -> Dict[str, str]:
                 / "query.jsonl"
             ),
             "output_dir": str(
-                script_dir / "deep_research_bench" / "results" / "edr_reports_gemini"
+                script_dir / "deep_research_bench" / "results" / f"edr_reports_{model_name}"
             ),
         }
     elif benchmark_type == "deepconsult":
@@ -1219,14 +1219,14 @@ def get_default_file_paths(benchmark_type: str) -> Dict[str, str]:
                 script_dir
                 / "ydc-deep-research-evals"
                 / "results"
-                / "edr_reports_gemini"
+                / f"edr_reports_{model_name}"
             ),
         }
     elif benchmark_type == "lrb":
         return {
             "queries_file": "",  # Not used for HuggingFace datasets
             "output_dir": str(
-                script_dir / "liveresearchbench" / "results" / "edr_reports_gemini"
+                script_dir / "liveresearchbench" / "results" / f"edr_reports_{model_name}"
             ),
         }
     elif benchmark_type == "healthbench":
@@ -1310,7 +1310,7 @@ def main():
     args = parser.parse_args()
 
     # Get default paths if not specified
-    default_paths = get_default_file_paths(args.benchmark)
+    default_paths = get_default_file_paths(args.benchmark, args.model)
     input_file = args.input or default_paths["queries_file"]
     output_dir = args.output_dir or default_paths["output_dir"]
 

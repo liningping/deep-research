@@ -92,7 +92,7 @@ python run_research_concurrent.py \
 **Step 2: Convert to benchmark format**
 ```bash
 python process_drb.py \
-  --input-dir deep_research_bench/data/test_data/raw_data/edr_reports_gemini \
+  --input-dir deep_research_bench/results/edr_reports_gemini \
   --model-name edr_gemini
 ```
 

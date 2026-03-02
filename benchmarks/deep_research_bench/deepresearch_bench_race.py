@@ -6,10 +6,12 @@ import argparse
 from tqdm import tqdm
 import logging
 import time
-import re 
+from dotenv import load_dotenv
+project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(project_dir, '.env'))
+
 from utils.api import AIClient
 from utils.io_utils import load_jsonl
-import glob
 
 # Import scoring prompts for Chinese and English
 from prompt.score_prompt_zh import generate_merged_score_prompt as zh_merged_score_prompt

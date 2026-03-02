@@ -1,6 +1,6 @@
 #!/bin/bash
 # Target model name list
-TARGET_MODELS=("claude-3-7-sonnet-latest")
+TARGET_MODELS=("edr_gemini")
 
 # Common parameters for both RACE and Citation evaluations
 RAW_DATA_DIR="data/test_data/raw_data"
@@ -68,33 +68,33 @@ for TARGET_MODEL in "${TARGET_MODELS[@]}"; do
   echo "Completed RACE benchmark test for target model: $TARGET_MODEL"
   echo -e "\n========== RACE test completed for $TARGET_MODEL ==========\n" >> "$OUTPUT_LOG_FILE"
   
-  # --- Phase 2: Citation Evaluation ---
-  echo "==== Phase 2: Running FACT Evaluation for $TARGET_MODEL ====" | tee -a "$OUTPUT_LOG_FILE"
+  # # --- Phase 2: Citation Evaluation ---
+  # echo "==== Phase 2: Running FACT Evaluation for $TARGET_MODEL ====" | tee -a "$OUTPUT_LOG_FILE"
 
-  # Create citation output directory if it doesn't exist
-  CITATION_OUTPUT="$OUTPUT_DIR/fact/$TARGET_MODEL"
-  RAW_DATA_PATH="$RAW_DATA_DIR/$TARGET_MODEL.jsonl"
-  mkdir -p $CITATION_OUTPUT
+  # # Create citation output directory if it doesn't exist
+  # CITATION_OUTPUT="$OUTPUT_DIR/fact/$TARGET_MODEL"
+  # RAW_DATA_PATH="$RAW_DATA_DIR/$TARGET_MODEL.jsonl"
+  # mkdir -p $CITATION_OUTPUT
 
-  # Run citation extraction, deduplication, scraping, and validation
-  echo "Extracting citations for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
-  python -u -m utils.extract --raw_data_path $RAW_DATA_PATH --output_path $CITATION_OUTPUT/extracted.jsonl --query_data_path $QUERY_DATA_PATH --n_total_process $N_TOTAL_PROCESS
+  # # Run citation extraction, deduplication, scraping, and validation
+  # echo "Extracting citations for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
+  # python -u -m utils.extract --raw_data_path $RAW_DATA_PATH --output_path $CITATION_OUTPUT/extracted.jsonl --query_data_path $QUERY_DATA_PATH --n_total_process $N_TOTAL_PROCESS
 
-  echo "Deduplicate citations for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
-  python -u -m utils.deduplicate --raw_data_path $CITATION_OUTPUT/extracted.jsonl --output_path $CITATION_OUTPUT/deduplicated.jsonl --query_data_path $QUERY_DATA_PATH --n_total_process $N_TOTAL_PROCESS
+  # echo "Deduplicate citations for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
+  # python -u -m utils.deduplicate --raw_data_path $CITATION_OUTPUT/extracted.jsonl --output_path $CITATION_OUTPUT/deduplicated.jsonl --query_data_path $QUERY_DATA_PATH --n_total_process $N_TOTAL_PROCESS
 
-  echo "Scrape webpages for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
-  python -u -m utils.scrape --raw_data_path $CITATION_OUTPUT/deduplicated.jsonl --output_path $CITATION_OUTPUT/scraped.jsonl --n_total_process $N_TOTAL_PROCESS
+  # echo "Scrape webpages for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
+  # python -u -m utils.scrape --raw_data_path $CITATION_OUTPUT/deduplicated.jsonl --output_path $CITATION_OUTPUT/scraped.jsonl --n_total_process $N_TOTAL_PROCESS
 
-  echo "Validate citations for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
-  python -u -m utils.validate --raw_data_path $CITATION_OUTPUT/scraped.jsonl --output_path $CITATION_OUTPUT/validated.jsonl --query_data_path $QUERY_DATA_PATH --n_total_process $N_TOTAL_PROCESS
+  # echo "Validate citations for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
+  # python -u -m utils.validate --raw_data_path $CITATION_OUTPUT/scraped.jsonl --output_path $CITATION_OUTPUT/validated.jsonl --query_data_path $QUERY_DATA_PATH --n_total_process $N_TOTAL_PROCESS
 
-  echo "Collecting statistics for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
-  python -u -m utils.stat --input_path $CITATION_OUTPUT/validated.jsonl --output_path $CITATION_OUTPUT/fact_result.txt
+  # echo "Collecting statistics for $TARGET_MODEL" | tee -a "$OUTPUT_LOG_FILE"
+  # python -u -m utils.stat --input_path $CITATION_OUTPUT/validated.jsonl --output_path $CITATION_OUTPUT/fact_result.txt
 
-  echo "Completed FACT benchmark test for target model: $TARGET_MODEL"
-  echo -e "\n========== FACT test completed for $TARGET_MODEL ==========\n" >> "$OUTPUT_LOG_FILE"
-  echo "--------------------------------------------------"
+  # echo "Completed FACT benchmark test for target model: $TARGET_MODEL"
+  # echo -e "\n========== FACT test completed for $TARGET_MODEL ==========\n" >> "$OUTPUT_LOG_FILE"
+  # echo "--------------------------------------------------"
 done
 
 echo "All benchmark tests completed. Logs saved in $OUTPUT_LOG_FILE"

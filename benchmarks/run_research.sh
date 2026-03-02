@@ -14,7 +14,7 @@ mkdir -p $LOGS_DIR
 #   --max-loops 2 \
 #   --output sample_result.json > $LOGS_DIR/traj.log 2>&1 &
 
-## DeepResearch Bench (DRB)
+# # DeepResearch Bench (DRB)
 # python -u run_research_concurrent.py \
 # --benchmark drb \
 # --input /Users/akshara.prabhakar/Documents/deep_research/benchmarks/deep_research_bench/data/prompt_data/query.jsonl \
@@ -22,6 +22,13 @@ mkdir -p $LOGS_DIR
 # --max_concurrent 1 \
 # --task_ids 1 \
 # --collect-traj > $LOGS_DIR/drb_traj_steer1.log 2>&1 &
+
+python run_research_concurrent.py \
+  --benchmark drb \
+  --max_concurrent 4 \
+  --provider openai \
+  --model deepseek-v3.2 \
+  --max_loops 3
 
 ## DeepConsult
 # python -u run_research_concurrent.py \
@@ -39,16 +46,16 @@ mkdir -p $LOGS_DIR
 # --save_md
 # --max_concurrent 3 > $LOGS_DIR/lrb_traj_steer.log 2>&1 &    
 
-# HealthBench
-python run_research_concurrent.py \
-    --benchmark healthbench \
-    --input healthbench_data/all.json \
-    --output_dir healthbench_trajectories \
-    --provider google \
-    --model gemini-2.5-pro \
-    --max_concurrent 6 \
-    --max_loops 5 \
-    --collect-traj > $LOGS_DIR/healthbench_traj_all.log 2>&1 &
+# # HealthBench
+# python run_research_concurrent.py \
+#     --benchmark healthbench \
+#     --input healthbench_data/all.json \
+#     --output_dir healthbench_trajectories \
+#     --provider google \
+#     --model gemini-2.5-pro \
+#     --max_concurrent 6 \
+#     --max_loops 5 \
+#     --collect-traj > $LOGS_DIR/healthbench_traj_all.log 2>&1 &
 
 # python process_healthbench.py  --input-dir healthbench_trajectories
 # python evaluate_healthbench.py healthbench_results/edr_healthbench_final_run_100.jsonl --grader-model gpt-4.1-2025-04-14
