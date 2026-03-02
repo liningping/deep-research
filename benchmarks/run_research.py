@@ -439,9 +439,19 @@ async def run_research_sync(
             },
         }
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(data_point, f, indent=2, ensure_ascii=False)
-        print(f"💾 JSON result saved to: {output_file}")
+        if output_file:
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(data_point, f, indent=2, ensure_ascii=False)
+            print(f"💾 JSON result saved to: {output_file}")
+            
+            # Save the report to a markdown file
+            try:
+                md_output_file = str(Path(output_file).with_suffix('.md'))
+                with open(md_output_file, "w", encoding="utf-8") as f:
+                    f.write(final_content)
+                print(f"📝 Markdown report saved to: {md_output_file}")
+            except Exception as e:
+                print(f"⚠️ Could not save markdown report: {e}")
 
         # Print comprehensive summary stats
         print("\n📋 Research Summary:")

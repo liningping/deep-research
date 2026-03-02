@@ -200,8 +200,8 @@ class SimpleOpenAIClient:
         self.model_name = model_name  # Public attribute for compatibility
         self._api_key = api_key
         self._max_tokens = max_tokens
-        self._client = openai.OpenAI(api_key="dummy",
-        base_url="https://gateway.salesforceresearch.ai/openai/process/v1/",
+        self._client = openai.OpenAI(api_key=OPENAI_API_KEY,
+        base_url=OPENAI_BASE_URL,
         default_headers={"X-Api-Key": "cbd5333186664d57f2ed8bb08d260bf7"},
     )
 

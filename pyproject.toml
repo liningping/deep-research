@@ -35,6 +35,7 @@ dependencies = [
     "langchain-google-vertexai>=3.2.1",
     "fastapi>=0.128.0",
     "aiofiles>=25.1.0",
+    "datasets>=4.6.0",
 ]
 
 [build-system]

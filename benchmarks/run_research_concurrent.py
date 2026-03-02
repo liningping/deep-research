@@ -22,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("research_concurrent.log"),
+        logging.FileHandler("research_concurrent.log", encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -1271,12 +1271,12 @@ def main():
     parser.add_argument(
         "--provider",
         choices=["openai", "anthropic", "groq", "google"],
-        default="google",
+        default="openai",
         help="LLM provider to use",
     )
     parser.add_argument(
         "--model",
-        default="gemini-2.5-pro",
+        default="o3-mini",
         help="LLM model name (e.g., 'o3-mini', 'claude-3-5-sonnet', 'gemini-2.5-pro')",
     )
     parser.add_argument(
