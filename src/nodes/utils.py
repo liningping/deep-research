@@ -77,8 +77,6 @@ def get_max_loops(
     configurable,
     extra_effort=False,
     minimum_effort=False,
-    benchmark_mode=False,
-    qa_mode=False,
 ):
     """Get maximum number of research loops with consistent handling of effort flags.
 
@@ -86,18 +84,13 @@ def get_max_loops(
         configurable: Configuration object containing max_web_research_loops
         extra_effort: Boolean flag indicating if extra effort (more loops) should be used
         minimum_effort: Boolean flag indicating if minimum effort (1 loop) should be used
-        benchmark_mode: Boolean flag indicating if running in benchmark mode
-        qa_mode: Boolean flag indicating if running in QA mode (1 loop)
 
     Returns:
         int: Maximum number of research loops to perform
     """
     # Minimum effort or QA mode overrides everything - use only 1 loop
-    if minimum_effort or qa_mode:
-        if qa_mode:
-            print("  - Using QA mode (1 loop)")
-        else:
-            print("  - Using minimum effort (1 loop)")
+    if minimum_effort:
+        print("  - Using minimum effort (1 loop)")
         return 1
 
     env_max_loops = os.environ.get("MAX_WEB_RESEARCH_LOOPS")

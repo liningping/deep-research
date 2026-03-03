@@ -25,9 +25,9 @@ mkdir -p $LOGS_DIR
 
 python run_research_concurrent.py \
   --benchmark drb \
-  --max_concurrent 4 \
+  --max_concurrent 5 \
   --provider openai \
-  --model deepseek-v3.2 \
+  --model qwen3-max \
   --max_loops 3
 
 ## DeepConsult

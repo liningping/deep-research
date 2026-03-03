@@ -24,6 +24,8 @@ from typing import Dict, Any, List, Optional
 
 from typing_extensions import Literal
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from pydantic import BaseModel
 
 from src.state import SummaryState
@@ -42,7 +44,7 @@ from src.prompts import (
     reflection_instructions,
     finalize_report_instructions,
 )
-from src.nodes.utils import get_callback_from_config, emit_event, get_max_loops
+from src.nodes.utils import get_callback_from_config, emit_event, get_max_loops, get_configurable
 
 logger = logging.getLogger(__name__)
 
@@ -1035,7 +1037,7 @@ When evaluating completeness, consider:
         print("--- REFLECTION END (Fatal Error) ---")
         return {
             # Fields calculated/updated by this node
-            "research_loop_count": research_loop_count + 1,
+            "research_loop_count": getattr(state, "research_loop_count", 0) + 1,
             "research_complete": True,
             "knowledge_gap": "",
             "search_query": "",
@@ -2212,9 +2214,7 @@ def route_research(state: SummaryState, config: RunnableConfig):
     minimum_effort = getattr(state, "minimum_effort", False)
 
     # Get max_loops using the utility function
-    max_loops = get_max_loops(
-        configurable, extra_effort, minimum_effort, state.benchmark_mode, state.qa_mode
-    )
+    max_loops = get_max_loops(configurable, extra_effort, minimum_effort)
     if state.research_loop_count >= max_loops:
         print(f"ROUTING OVERRIDE: Max loops reached ({max_loops}), finalizing report")
         return "finalize_report"

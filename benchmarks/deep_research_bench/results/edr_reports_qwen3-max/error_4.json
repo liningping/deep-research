@@ -1,0 +1,6 @@
+{
+  "id": 4,
+  "query": "分析 2010 年至今的黄金走势，用思维导图告诉我黄金未来有可能的趋势，关键压力，关键支撑位置",
+  "error": "name 'SystemMessage' is not defined",
+  "timestamp": "2026-03-03T11:23:22.633952"
+}

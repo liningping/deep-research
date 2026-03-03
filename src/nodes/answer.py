@@ -26,12 +26,6 @@ from langchain_core.runnables import RunnableConfig
 from src.state import SummaryState
 from src.configuration import Configuration
 from llm_clients import get_llm_client
-from src.prompts_qa import (
-    ANSWER_GENERATION_PROMPT as QA_ANSWER_GENERATION_PROMPT,
-    ANSWER_REFLECTION_PROMPT as QA_ANSWER_REFLECTION_PROMPT,
-    FINAL_ANSWER_PROMPT as QA_FINAL_ANSWER_PROMPT,
-    ANSWER_VERIFICATION_PROMPT as QA_ANSWER_VERIFICATION_PROMPT,
-)
 from src.prompts_benchmark import (
     ANSWER_GENERATION_PROMPT as BENCHMARK_ANSWER_GENERATION_PROMPT,
     ANSWER_REFLECTION_PROMPT as BENCHMARK_ANSWER_REFLECTION_PROMPT,
@@ -179,12 +173,8 @@ def post_process_benchmark_answer(answer, source_citations):
 def generate_answer(state: SummaryState, config: RunnableConfig):
     """
     Generate a concise, fact-based answer for QA and benchmark questions.
-    This node is used when qa_mode or benchmark_mode is True.
     """
     print(f"--- ENTERING generate_answer (Loop {state.research_loop_count}) ---")
-    print(
-        f"[generate_answer] qa_mode={state.qa_mode}, benchmark_mode={state.benchmark_mode}"
-    )
     print(f"[generate_answer] research_topic={state.research_topic}")
 
     # Start timer for performance logging
@@ -255,19 +245,10 @@ def generate_answer(state: SummaryState, config: RunnableConfig):
     one_year_ago = str(today.year - 1)
 
     # Choose the appropriate prompt based on mode
-    if state.benchmark_mode:
-        answer_prompt = BENCHMARK_ANSWER_GENERATION_PROMPT
-        print(
-            f"[generate_answer] Using BENCHMARK mode prompts with full citation processing"
-        )
-    elif state.qa_mode:
-        answer_prompt = QA_ANSWER_GENERATION_PROMPT
-        print(f"[generate_answer] Using QA mode prompts")
-    else:
-        # Fallback to QA mode if neither is specified
-        answer_prompt = QA_ANSWER_GENERATION_PROMPT
-        print(f"[generate_answer] Fallback to QA mode prompts")
-
+    answer_prompt = BENCHMARK_ANSWER_GENERATION_PROMPT
+    print(
+        f"[generate_answer] Using BENCHMARK mode prompts with full citation processing"
+    )
     # Generate focused answer using the selected prompt
     prompt = answer_prompt.format(
         current_date=current_date,
@@ -531,7 +512,6 @@ def generate_answer(state: SummaryState, config: RunnableConfig):
     # Return the updates as a dictionary instead of modifying state directly
     return {
         "benchmark_result": answer_result,
-        "qa_mode": state.qa_mode,
         "benchmark_mode": state.benchmark_mode,
         "research_loop_count": getattr(state, "research_loop_count", 0) + 1,
         "previous_answers": previous_answers_updated,
@@ -593,7 +573,7 @@ def reflect_answer(state: SummaryState, config: Dict[str, Any]) -> Dict[str, Any
 
     # Get max loops using the utility function
     max_loops = get_max_loops(
-        configurable, extra_effort, minimum_effort, state.benchmark_mode, state.qa_mode
+        configurable, extra_effort, minimum_effort
     )
     research_loop_count = state.research_loop_count
 
@@ -614,16 +594,8 @@ def reflect_answer(state: SummaryState, config: Dict[str, Any]) -> Dict[str, Any
     one_year_ago = str(today.year - 1)
 
     # Choose the appropriate reflection prompt based on mode
-    if state.benchmark_mode:
-        reflection_prompt = BENCHMARK_ANSWER_REFLECTION_PROMPT
-        print(f"[reflect_answer] Using BENCHMARK mode reflection prompts")
-    elif state.qa_mode:
-        reflection_prompt = QA_ANSWER_REFLECTION_PROMPT
-        print(f"[reflect_answer] Using QA mode reflection prompts")
-    else:
-        # Fallback to QA mode
-        reflection_prompt = QA_ANSWER_REFLECTION_PROMPT
-        print(f"[reflect_answer] Fallback to QA mode reflection prompts")
+    reflection_prompt = BENCHMARK_ANSWER_REFLECTION_PROMPT
+    print(f"[reflect_answer] Using BENCHMARK mode reflection prompts")
 
     # Prepare reflection prompt with additional parameters including time context
     prompt = reflection_prompt.format(
@@ -910,7 +882,7 @@ def route_after_reflect_answer(state: SummaryState, config: RunnableConfig):
         print(f"  - Reading MAX_WEB_RESEARCH_LOOPS from environment: {env_max_loops}")
 
     max_loops = get_max_loops(
-        configurable, extra_effort, minimum_effort, state.benchmark_mode, state.qa_mode
+        configurable, extra_effort, minimum_effort
     )
     print(
         f"  - Using max_loops={max_loops} (extra_effort={extra_effort}, base={configurable.max_web_research_loops or 3})"
@@ -1225,16 +1197,8 @@ def finalize_answer(state: SummaryState, config: RunnableConfig):
     one_year_ago = str(today.year - 1)
 
     # Choose the appropriate final answer prompt based on mode
-    if state.benchmark_mode:
-        final_prompt = BENCHMARK_FINAL_ANSWER_PROMPT
-        print(f"[finalize_answer] Using BENCHMARK mode final answer prompts")
-    elif state.qa_mode:
-        final_prompt = QA_FINAL_ANSWER_PROMPT
-        print(f"[finalize_answer] Using QA mode final answer prompts")
-    else:
-        # Fallback to QA mode
-        final_prompt = QA_FINAL_ANSWER_PROMPT
-        print(f"[finalize_answer] Fallback to QA mode final answer prompts")
+    final_prompt = BENCHMARK_FINAL_ANSWER_PROMPT
+    print(f"[finalize_answer] Using BENCHMARK mode final answer prompts")
 
     # Use the selected FINAL_ANSWER_PROMPT
     prompt = final_prompt.format(
@@ -1558,7 +1522,6 @@ def finalize_answer(state: SummaryState, config: RunnableConfig):
     # Return the updated state with the final result
     return {
         "benchmark_result": final_result,
-        "qa_mode": state.qa_mode,
         "benchmark_mode": state.benchmark_mode,
         "research_complete": True,
         "previous_answers": previous_answers,  # Preserve previous answers

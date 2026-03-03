@@ -79,7 +79,7 @@ def create_graph():
 
     # Route after search: QA/Benchmark → validation path, Regular → report path
     def route_after_multi_agents_decision(state):
-        if state.qa_mode or state.benchmark_mode:
+        if state.benchmark_mode:
             return "validate_context_sufficiency"
         else:
             return "generate_report"

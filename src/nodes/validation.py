@@ -19,10 +19,6 @@ from langchain_core.runnables import RunnableConfig
 from src.state import SummaryState
 from src.configuration import Configuration
 from llm_clients import get_llm_client
-from src.prompts_qa import (
-    VALIDATE_RETRIEVAL_PROMPT as QA_VALIDATE_RETRIEVAL_PROMPT,
-    REFINE_QUERY_PROMPT as QA_REFINE_QUERY_PROMPT,
-)
 from src.prompts_benchmark import (
     VALIDATE_RETRIEVAL_PROMPT as BENCHMARK_VALIDATE_RETRIEVAL_PROMPT,
     REFINE_QUERY_PROMPT as BENCHMARK_REFINE_QUERY_PROMPT,
@@ -142,12 +138,7 @@ def validate_context_sufficiency(
         }
 
     # Choose the appropriate validation prompt based on mode
-    if state.benchmark_mode:
-        validate_prompt = BENCHMARK_VALIDATE_RETRIEVAL_PROMPT
-    elif state.qa_mode:
-        validate_prompt = QA_VALIDATE_RETRIEVAL_PROMPT
-    else:
-        validate_prompt = QA_VALIDATE_RETRIEVAL_PROMPT  # Fallback
+    validate_prompt = BENCHMARK_VALIDATE_RETRIEVAL_PROMPT
 
     prompt = validate_prompt.format(
         current_date=CURRENT_DATE,
@@ -332,13 +323,7 @@ def refine_query(state: SummaryState, config: RunnableConfig) -> Dict[str, Any]:
     full_refinement_context_for_llm = "\n\n---\n\n".join(refinement_context_parts)
 
     # Choose the appropriate refinement prompt based on mode
-    if state.benchmark_mode:
-        refine_prompt = BENCHMARK_REFINE_QUERY_PROMPT
-    elif state.qa_mode:
-        refine_prompt = QA_REFINE_QUERY_PROMPT
-    else:
-        refine_prompt = QA_REFINE_QUERY_PROMPT  # Fallback
-
+    refine_prompt = BENCHMARK_REFINE_QUERY_PROMPT
     prompt = refine_prompt.format(
         current_date=CURRENT_DATE,
         current_year=CURRENT_YEAR,
