@@ -6,14 +6,12 @@ SummaryState is the core state passed between graph nodes.
 SummaryStateInput/SummaryStateOutput define the graph's I/O contract.
 """
 
-import operator
 import logging
 import json
-from dataclasses import dataclass, field
-from typing_extensions import TypedDict, Annotated
-from typing import List, Dict, Optional, Any, Literal, Union
+from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,17 +93,7 @@ class SummaryState(BaseModel):
     # ===== Configuration =====
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration settings")
 
-    # ===== Steering (kept for interface compatibility, no-op without service layer) =====
-    steering_enabled: bool = Field(default=False, description="Whether steering is enabled")
-    steering_todo: Optional[Any] = Field(default=None, description="Simple todo manager for steering")
-    pending_steering_messages: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Queue of pending steering messages"
-    )
 
-    # ===== Database (kept for interface compatibility) =====
-    database_info: Optional[List[Dict[str, Any]]] = Field(
-        default=None, description="Information about uploaded databases"
-    )
 
     def model_post_init(self, __context):
         """Post-initialization hook."""
@@ -162,27 +150,7 @@ class SummaryState(BaseModel):
         except Exception:
             pass  # Trajectory logging should never break research
 
-    # ===== Steering Stub Methods (no-op without service layer) =====
 
-    async def add_steering_message(self, message: str) -> Dict[str, Any]:
-        """Add a steering message (no-op in simplified version)."""
-        return {"message_queued": False, "note": "Steering not available in simplified version"}
-
-    async def prepare_steering_for_next_loop(self) -> Dict[str, Any]:
-        """Prepare steering for next loop (no-op in simplified version)."""
-        return {"steering_enabled": False}
-
-    def get_steering_plan(self) -> str:
-        """Get current steering plan (no-op in simplified version)."""
-        return "# No steering enabled\n\nSteering is not enabled in simplified version."
-
-    def should_cancel_search(self, search_query: str) -> bool:
-        """Check if search should be cancelled (always False in simplified version)."""
-        return False
-
-    def get_search_priority_boost(self, search_query: str) -> int:
-        """Get priority boost for search query (always 0 in simplified version)."""
-        return 0
 
 
 class SummaryStateInput(BaseModel):
@@ -198,9 +166,7 @@ class SummaryStateInput(BaseModel):
     uploaded_knowledge: Optional[str] = None
     uploaded_files: Optional[List[str]] = None
     config: Optional[Dict[str, Any]] = None
-    steering_enabled: bool = False
-    steering_todo: Optional[Any] = None
-    database_info: Optional[List[Dict[str, Any]]] = None
+
 
 
 class SummaryStateOutput(BaseModel):
