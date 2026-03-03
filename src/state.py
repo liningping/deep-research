@@ -56,8 +56,6 @@ class SummaryState(BaseModel):
     # ===== Mode Flags =====
     extra_effort: bool = Field(default=False, description="Whether to use extra effort")
     minimum_effort: bool = Field(default=False, description="Whether to use minimum effort")
-    qa_mode: bool = Field(default=False, description="Whether in QA mode")
-    benchmark_mode: bool = Field(default=False, description="Whether in benchmark mode")
 
     # ===== LLM Configuration =====
     llm_provider: Optional[str] = Field(default=None, description="LLM provider")
@@ -72,11 +70,6 @@ class SummaryState(BaseModel):
     formatted_sources: List[Dict[str, Any]] = Field(default_factory=list, description="Formatted sources for UI")
     useful_information: str = Field(default="", description="Useful information extracted")
     missing_information: str = Field(default="", description="Missing information identified")
-    needs_refinement: bool = Field(default=False, description="Whether query needs refinement")
-    current_refined_query: str = Field(default="", description="Current refined query")
-    refinement_reasoning: str = Field(default="", description="Reasoning for refinement")
-    previous_answers: List[str] = Field(default_factory=list, description="Previous answers")
-    reflection_history: List[str] = Field(default_factory=list, description="Reflection history")
 
     # ===== Visualization (kept for interface compatibility) =====
     visualization_disabled: bool = Field(default=True, description="Whether visualizations are disabled")
@@ -88,7 +81,6 @@ class SummaryState(BaseModel):
 
     # ===== Report =====
     markdown_report: Optional[str] = Field(default="", description="Plain markdown report")
-    benchmark_result: Optional[Dict[str, Any]] = Field(default=None, description="Benchmark result")
 
     # ===== Configuration =====
     config: Dict[str, Any] = Field(default_factory=dict, description="Configuration settings")
@@ -159,8 +151,6 @@ class SummaryStateInput(BaseModel):
     research_topic: str
     extra_effort: bool = False
     minimum_effort: bool = False
-    qa_mode: bool = Field(default=False, description="Whether to run in QA mode")
-    benchmark_mode: bool = Field(default=False, description="Whether to run in benchmark mode")
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
     uploaded_knowledge: Optional[str] = None
@@ -178,9 +168,6 @@ class SummaryStateOutput(BaseModel):
     sources_gathered: List[str]
     web_research_results: List[Dict[str, Any]] = []
     source_citations: Dict[str, Dict[str, str]]
-    qa_mode: bool = Field(default=False, description="Whether ran in QA mode")
-    benchmark_mode: bool = Field(default=False, description="Whether ran in benchmark mode")
-    benchmark_result: Optional[Dict[str, Any]] = Field(default=None, description="Benchmark results")
     visualizations: List[Dict[str, Any]] = []
     base64_encoded_images: List[Dict[str, Any]] = []
     visualization_paths: List[str] = []

@@ -429,17 +429,7 @@ Query Generation Strategy:
             existing_tasks,
         )
 
-        # Log decomposition in benchmark mode
-        if hasattr(self, "state") and getattr(self.state, "benchmark_mode", False):
-            print(f"[plan_research] Benchmark mode: Question decomposition")
-            if "subtopics" in topic_info:
-                print(f"[plan_research] Identified subtopics:")
-                for i, subtopic in enumerate(topic_info.get("subtopics", [])):
-                    print(f"  {i+1}. {subtopic}")
-            if "key_entities" in topic_info:
-                print(f"[plan_research] Key entities:")
-                for entity in topic_info.get("key_entities", []):
-                    print(f"  - {entity}")
+
 
         # Create a research plan based on the topic complexity
         if topic_info.get("topic_complexity") == "complex":
@@ -478,10 +468,7 @@ Query Generation Strategy:
             # Skip visualization tasks if in benchmark mode
             if not (
                 hasattr(self, "state")
-                and (
-                    getattr(self.state, "benchmark_mode", False)
-                    or getattr(self.state, "visualization_disabled", False)
-                )
+                and getattr(self.state, "visualization_disabled", False)
             ):
                 # Add visualization tasks based on recommended visualizations
                 for i, viz in enumerate(
@@ -544,10 +531,7 @@ Query Generation Strategy:
             # Skip visualization tasks if in benchmark mode or visualization mode is disabled
             if not (
                 hasattr(self, "state")
-                and (
-                    getattr(self.state, "benchmark_mode", False)
-                    or getattr(self.state, "visualization_disabled", False)
-                )
+                and getattr(self.state, "visualization_disabled", False)
             ):
                 # Add a generic visualization task for simple topics
                 if topic_info.get("recommended_visualizations"):
@@ -580,17 +564,6 @@ Query Generation Strategy:
             f"[MasterAgent] - {visualization_task_count} visualization tasks"
         )
 
-        if hasattr(self, "state") and getattr(self.state, "benchmark_mode", False):
-            print(f"[plan_research] Benchmark mode: Research plan created")
-            print(f"[plan_research] Plan contains {search_task_count} search tasks")
-            if search_task_count > 0:
-                print(f"[plan_research] Search queries:")
-                for i, task in enumerate(
-                    [t for t in plan.get("subtasks", []) if t.get("type") == "search"]
-                ):
-                    print(
-                        f"  {i+1}. \"{task.get('query')}\" (source: {task.get('source_type', 'general')})"
-                    )
 
         return plan
 
@@ -711,10 +684,6 @@ Query Generation Strategy:
 
         # State is accessible via self.state set in execute_research
 
-        # Track if we're in benchmark mode
-        benchmark_mode = getattr(state, "benchmark_mode", False)
-        if benchmark_mode:
-            print(f"[_execute_search_tasks] Executing search tasks in benchmark mode")
 
         visualization_disabled = getattr(state, "visualization_disabled", False)
         if visualization_disabled:

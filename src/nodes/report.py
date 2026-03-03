@@ -393,15 +393,15 @@ def reflect_on_report(state: SummaryState, config: RunnableConfig) -> Dict[str, 
             state, "minimum_effort", False
         )  # Get minimum_effort flag
         max_research_loops = get_max_loops(
-            configurable, extra_effort, minimum_effort, state.benchmark_mode
-        )  # Pass minimum_effort and benchmark_mode
+            configurable, extra_effort, minimum_effort
+        )
         research_topic = state.research_topic
 
         print(f"\n--- REFLECTION START (Loop {research_loop_count+1}) ---")
         print(f"  - Current Loop Count: {research_loop_count}")
         print(
-            f"  - Max Research Loops: {max_research_loops} (extra_effort={extra_effort}, minimum_effort={minimum_effort}, benchmark_mode={state.benchmark_mode})"
-        )  # Update log
+            f"  - Max Research Loops: {max_research_loops} (extra_effort={extra_effort}, minimum_effort={minimum_effort})"
+        )
         print(f"  - Research Topic: {research_topic}")
 
         # Increment the research loop counter

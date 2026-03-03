@@ -223,8 +223,6 @@ class DRBDatasetManager(BenchmarkDatasetManager):
         return {
             "max_loops": 5,
             "extra_effort": False,
-            "qa_mode": False,
-            "benchmark_mode": False,
         }
 
     def format_result(self, task_data: Dict, result_data: Dict) -> Dict:
@@ -296,8 +294,6 @@ class DeepConsultDatasetManager(BenchmarkDatasetManager):
     def get_processing_config(self) -> Dict:
         return {
             "max_loops_default": 10,  # Max 10 loops as requested
-            "benchmark_mode": False,  # Regular mode as requested
-            "qa_mode": False,
             "visualization_disabled": True,
         }
 
@@ -365,8 +361,6 @@ class HealthBenchDatasetManager(BenchmarkDatasetManager):
         return {
             "max_loops": 5,  # 3 loops for medical questions
             "extra_effort": False,
-            "qa_mode": False,
-            "benchmark_mode": False,  # Use benchmark mode for citations
         }
 
     def format_result(self, task_data: Dict, result_data: Dict) -> Dict:
@@ -497,8 +491,6 @@ class HFDatasetManager(BenchmarkDatasetManager):
     def get_processing_config(self) -> Dict:
         return {
             "max_loops_default": self.max_loops,
-            "benchmark_mode": self.mode == "benchmark",
-            "qa_mode": self.mode == "qa",
             "visualization_disabled": True,
         }
 
@@ -521,8 +513,7 @@ async def run_single_research_task_with_trajectory(
     max_web_search_loops: int = 5,
     extra_effort: bool = False,
     minimum_effort: bool = False,
-    qa_mode: bool = False,
-    benchmark_mode: bool = False,
+
     visualization_disabled: bool = True,
     task_manager=None,
     collect_trajectory: bool = False,
@@ -641,8 +632,7 @@ async def run_single_research_task_with_trajectory(
             subtopics_metadata=[],
             extra_effort=extra_effort,
             minimum_effort=minimum_effort,
-            qa_mode=qa_mode,
-            benchmark_mode=benchmark_mode,
+
             visualization_disabled=visualization_disabled,
             llm_provider=provider,
             llm_model=model,
@@ -900,39 +890,31 @@ async def run_single_research_task_with_trajectory(
         elif not isinstance(final_summary, str):
             final_summary = str(final_summary)
 
-        if qa_mode or benchmark_mode:
-            benchmark_result = result.get("benchmark_result", {})
-            final_content = (
-                benchmark_result.get("full_response", final_summary)
-                if benchmark_result
-                else final_summary
-            )
-        else:
-            markdown_report = result.get("markdown_report", "")
-            # Handle if markdown_report is also a list or other non-string type
-            if isinstance(markdown_report, list):
-                markdown_report = "\n\n".join(str(s) for s in markdown_report)
-            elif not isinstance(markdown_report, str):
-                markdown_report = str(markdown_report) if markdown_report else ""
+        markdown_report = result.get("markdown_report", "")
+        # Handle if markdown_report is also a list or other non-string type
+        if isinstance(markdown_report, list):
+            markdown_report = "\n\n".join(str(s) for s in markdown_report)
+        elif not isinstance(markdown_report, str):
+            markdown_report = str(markdown_report) if markdown_report else ""
 
-            if markdown_report and markdown_report.strip():
-                # Find the start of Executive Summary section and trim TOC
-                exec_summary_start = markdown_report.find("## Executive Summary\n")
-                if exec_summary_start >= 0:
-                    final_content = markdown_report[exec_summary_start:]
-                    logger.info(
-                        f"[Task {task_id}] Using clean markdown report (from Executive Summary)"
-                    )
-                else:
-                    final_content = markdown_report
-                    logger.info(
-                        f"[Task {task_id}] Using complete markdown report (no Executive Summary found)"
-                    )
-            else:
-                final_content = final_summary
+        if markdown_report and markdown_report.strip():
+            # Find the start of Executive Summary section and trim TOC
+            exec_summary_start = markdown_report.find("## Executive Summary\n")
+            if exec_summary_start >= 0:
+                final_content = markdown_report[exec_summary_start:]
                 logger.info(
-                    f"[Task {task_id}] Using running summary (no markdown report available)"
+                    f"[Task {task_id}] Using clean markdown report (from Executive Summary)"
                 )
+            else:
+                final_content = markdown_report
+                logger.info(
+                    f"[Task {task_id}] Using complete markdown report (no Executive Summary found)"
+                )
+        else:
+            final_content = final_summary
+            logger.info(
+                f"[Task {task_id}] Using running summary (no markdown report available)"
+            )
 
         task_end_time = datetime.now()
         total_duration = task_end_time - task_start_time
@@ -993,7 +975,7 @@ async def run_single_research_task_with_trajectory(
                 "model": model,
                 "max_loops": max_web_search_loops,
                 "extra_effort": extra_effort,
-                "qa_mode": qa_mode,
+
                 "benchmark": benchmark_type,
             },
             "trajectory": (
@@ -1399,10 +1381,7 @@ def main():
         max_loops = args.max_loops
         logger.info(f"Using user-specified max_loops: {max_loops}")
 
-    # Get other config values
-    benchmark_mode = config.get("benchmark_mode", False)
-    qa_mode = config.get("qa_mode", False)
-    logger.info(f"Using benchmark_mode: {benchmark_mode}, qa_mode: {qa_mode}")
+
 
     # Start execution
     GLOBAL_STATS["start_time"] = time.time()
@@ -1421,8 +1400,7 @@ def main():
                 max_web_search_loops=max_loops,
                 extra_effort=args.extra_effort,
                 minimum_effort=args.minimum_effort,
-                qa_mode=qa_mode,  # Use config value
-                benchmark_mode=benchmark_mode,  # Use config value
+
                 visualization_disabled=True,
                 collect_trajectory=args.collect_traj,
                 save_md=args.save_md,

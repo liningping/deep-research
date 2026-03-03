@@ -312,27 +312,9 @@ async def async_multi_agents_network(state: SummaryState, callbacks=None):
                 "research_loop_count", 0
             )
 
-        # Explicitly preserve benchmark fields from the original state, as they are critical for flow
-        benchmark_fields = [
-            "benchmark_mode",
-            "benchmark_result",
-            "previous_answers",
-            "reflection_history",
-            "config",
-        ]
-        for field in benchmark_fields:
-            if field in current_state_dict:  # Prioritize original state for these
-                if updated_results.get(field) != current_state_dict[field]:
-                    logger.info(
-                        f"[async_multi_agents_network] Preserving benchmark field '{field}' from original state."
-                    )
-                updated_results[field] = current_state_dict[field]
-            elif (
-                field not in updated_results
-            ):  # If not in current_state_dict and not set by agent
-                updated_results[field] = (
-                    None  # Or some default like [] for lists, {} for dicts
-                )
+        # Explicitly preserve config from the original state
+        if "config" in current_state_dict:
+            updated_results["config"] = current_state_dict["config"]
 
         # Visualization fields should ideally be part of raw_agent_results if it's a dict,
         # or handled within MasterResearchAgent to be part of its structured output.

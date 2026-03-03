@@ -33,20 +33,6 @@ from src.nodes.report import (
     route_after_search,
     route_after_multi_agents,
 )
-from src.nodes.answer import (
-    generate_answer,
-    reflect_answer,
-    route_after_multi_agents_benchmark,
-    route_after_generate_answer,
-    route_after_reflect_answer,
-    verify_answer,
-    finalize_answer,
-    post_process_benchmark_answer,
-)
-from src.nodes.validation import (
-    validate_context_sufficiency,
-    refine_query,
-)
 
 # Backward-compatible re-exports used by agent_architecture.py
 from src.tools import SearchToolRegistry as ToolRegistry, ToolExecutor
@@ -68,50 +54,14 @@ def create_graph():
     builder.add_node("generate_report", generate_report)
     builder.add_node("reflect_on_report", reflect_on_report)
     builder.add_node("finalize_report", finalize_report)
-    builder.add_node("generate_answer", generate_answer)
-    builder.add_node("reflect_answer", reflect_answer)
-    builder.add_node("finalize_answer", finalize_answer)
-    builder.add_node("validate_context_sufficiency", validate_context_sufficiency)
-    builder.add_node("refine_query", refine_query)
 
     # === Edges ===
     builder.add_edge(START, "multi_agents_network")
 
-    # Route after search: QA/Benchmark → validation path, Regular → report path
-    def route_after_multi_agents_decision(state):
-        if state.benchmark_mode:
-            return "validate_context_sufficiency"
-        else:
-            return "generate_report"
+    # After search, always go to report generation
+    builder.add_edge("multi_agents_network", "generate_report")
 
-    builder.add_conditional_edges(
-        "multi_agents_network",
-        route_after_multi_agents_decision,
-        {
-            "validate_context_sufficiency": "validate_context_sufficiency",
-            "generate_report": "generate_report",
-        },
-    )
-
-    # === Benchmark/QA Path ===
-    builder.add_conditional_edges(
-        "validate_context_sufficiency",
-        lambda state: "refine_query" if state.needs_refinement else "generate_answer",
-        {"refine_query": "refine_query", "generate_answer": "generate_answer"},
-    )
-    builder.add_edge("refine_query", "multi_agents_network")
-    builder.add_edge("generate_answer", "reflect_answer")
-    builder.add_conditional_edges(
-        "reflect_answer",
-        lambda state: route_after_reflect_answer(state, {}),
-        {
-            "multi_agents_network": "multi_agents_network",
-            "finalize_answer": "finalize_answer",
-        },
-    )
-    builder.add_edge("finalize_answer", END)
-
-    # === Regular Report Path ===
+    # === Report Path ===
     builder.add_edge("generate_report", "reflect_on_report")
     builder.add_conditional_edges(
         "reflect_on_report",
