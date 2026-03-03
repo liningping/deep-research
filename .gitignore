@@ -76,3 +76,4 @@ backend_logs*
 .langgraph_api
 
 .claude/
+*.json
