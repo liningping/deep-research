@@ -63,7 +63,6 @@ class SearchToolRegistry:
             self.register_tool(github_search)
             self.register_tool(academic_search)
             self.register_tool(linkedin_search)
-            self.register_tool(text2sql)
             
             logger.info(f"Registered {len(self.tools)} default search tools")
             logger.info(f"[SearchToolRegistry._register_default_tools] Registered tools: {list(self.tools.keys())}")
