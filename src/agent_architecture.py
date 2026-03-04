@@ -25,6 +25,12 @@ from src.tools.executor import ToolExecutor
 
 import time
 
+import logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 
 class MasterResearchAgent:
     """
@@ -142,11 +148,18 @@ Query Generation Strategy:
             # Import async client getter
             from llm_clients import get_async_llm_client
 
-            # No steering context in DRB mode
-            steering_context = "No steering instructions provided. Follow standard research approach."
-
-            # No database context in DRB mode
-            database_context = "No database files are available. Use standard web search tools."
+            # Get steering context if available
+            steering_context = ""
+            if (
+                hasattr(self, "state")
+                and self.state
+                and hasattr(self.state, "steering_todo")
+                and self.state.steering_todo
+            ):
+                steering_context = self.state.get_steering_plan()
+                self.logger.info(f"[STEERING] Including steering context in prompt")
+            else:
+                steering_context = "No steering instructions provided. Follow standard research approach."
 
             # Build existing tasks context for duplicate prevention
             existing_tasks_context = ""
@@ -171,17 +184,14 @@ Query Generation Strategy:
                 current_year=CURRENT_YEAR,
                 one_year_ago=ONE_YEAR_AGO,
                 AUGMENT_KNOWLEDGE_CONTEXT=AUGMENT_KNOWLEDGE_CONTEXT,
-                DATABASE_CONTEXT=database_context,
                 steering_context=steering_context,
+                DATABASE_CONTEXT=None
             )
 
             # Append existing_tasks_context after formatting (so it's not part of the template)
             if existing_tasks_context:
                 formatted_prompt += existing_tasks_context
 
-            self.logger.info(
-                f"[MasterAgent.decompose_topic] Database context being passed to LLM: {database_context[:200]}..."
-            )
 
             # Get the appropriate ASYNC LLM client based on provider
             # llm = get_llm_client(provider, model) # Old sync call
@@ -429,7 +439,17 @@ Query Generation Strategy:
             existing_tasks,
         )
 
-
+        # Log decomposition in benchmark mode
+        if hasattr(self, "state") and getattr(self.state, "benchmark_mode", False):
+            logger.info(f"[plan_research] Benchmark mode: Question decomposition")
+            if "subtopics" in topic_info:
+                logger.info(f"[plan_research] Identified subtopics:")
+                for i, subtopic in enumerate(topic_info.get("subtopics", [])):
+                    logger.info(f"  {i+1}. {subtopic}")
+            if "key_entities" in topic_info:
+                logger.info(f"[plan_research] Key entities:")
+                for entity in topic_info.get("key_entities", []):
+                    logger.info(f"  - {entity}")
 
         # Create a research plan based on the topic complexity
         if topic_info.get("topic_complexity") == "complex":
@@ -468,7 +488,10 @@ Query Generation Strategy:
             # Skip visualization tasks if in benchmark mode
             if not (
                 hasattr(self, "state")
-                and getattr(self.state, "visualization_disabled", False)
+                and (
+                    getattr(self.state, "benchmark_mode", False)
+                    or getattr(self.state, "visualization_disabled", False)
+                )
             ):
                 # Add visualization tasks based on recommended visualizations
                 for i, viz in enumerate(
@@ -504,8 +527,7 @@ Query Generation Strategy:
             suggested_tool = topic_info.get("suggested_tool", "general_search")
 
             # Map suggested_tool to source_type (for backwards compatibility)
-            source_type_map = {
-                "text2sql": "text2sql",
+            source_type_map = {   
                 "general_search": "general",
                 "academic_search": "academic",
                 "github_search": "github",
@@ -531,7 +553,10 @@ Query Generation Strategy:
             # Skip visualization tasks if in benchmark mode or visualization mode is disabled
             if not (
                 hasattr(self, "state")
-                and getattr(self.state, "visualization_disabled", False)
+                and (
+                    getattr(self.state, "benchmark_mode", False)
+                    or getattr(self.state, "visualization_disabled", False)
+                )
             ):
                 # Add a generic visualization task for simple topics
                 if topic_info.get("recommended_visualizations"):
@@ -564,9 +589,365 @@ Query Generation Strategy:
             f"[MasterAgent] - {visualization_task_count} visualization tasks"
         )
 
+        if hasattr(self, "state") and getattr(self.state, "benchmark_mode", False):
+            logger.info(f"[plan_research] Benchmark mode: Research plan created")
+            logger.info(f"[plan_research] Plan contains {search_task_count} search tasks")
+            if search_task_count > 0:
+                logger.info(f"[plan_research] Search queries:")
+                for i, task in enumerate(
+                    [t for t in plan.get("subtasks", []) if t.get("type") == "search"]
+                ):
+                    logger.info(
+                        f"  {i+1}. \"{task.get('query')}\" (source: {task.get('source_type', 'general')})"
+                    )
 
         return plan
 
+    async def plan_research_from_tasks(
+        self,
+        query: str,
+        tasks: List,
+        knowledge_gap: str,
+        research_loop_count: int,
+        state=None,
+    ):
+        """
+        Generate research plan that explicitly targets completing specific todo tasks.
+        This is the KEY method that makes tasks drive research - inspired by Manus AI's iterative agent loop.
+
+        Like Cursor/Claude Code, this creates explicit task → query mappings so we can:
+        1. Generate queries specifically to complete each task
+        2. Track which query completes which task
+        3. Mark tasks as completed after successful searches
+        4. Verify all user requirements are met
+        """
+        from src.simple_steering import SteeringTask
+
+        self.logger.info(
+            f"[TASK_PLANNING] Planning research to complete {len(tasks)} specific tasks"
+        )
+
+        # Format tasks for the prompt with clear IDs and priorities
+        task_list_lines = []
+        for i, task in enumerate(tasks):
+            task_list_lines.append(
+                f"  {i+1}. [{task.id}] (Priority {task.priority}/10) {task.description}"
+            )
+        task_list = "\n".join(task_list_lines)
+
+        # Get research context
+        research_context = ""
+        if state:
+            research_context = f"""
+Research History:
+- Loop: {research_loop_count}
+- Previous findings: {state.running_summary[-500:] if state.running_summary else 'Starting fresh'}
+- Sources gathered: {len(state.sources_gathered)} sources
+- Knowledge gap: {knowledge_gap}
+"""
+
+
+        # Build prompt following Manus AI's approach: analyze current state, select actions
+        planning_prompt = f"""
+You are a research planning agent operating in an iterative task completion loop.
+
+CURRENT STATE:
+{research_context}
+
+MAIN RESEARCH TOPIC: {query}
+
+TODO LIST (Tasks You MUST Complete):
+{task_list}
+
+YOUR JOB:
+For EACH task in the todo list above, generate ONE specific search query/code that will complete that task.
+
+
+🚨 CRITICAL RULES:
+1. Write queries in NATURAL LANGUAGE (plain English), NEVER SQL code
+2. Select appropriate tool for each query
+3. If task is about external info → tool="general_search"
+
+Return JSON with THIS EXACT format:
+{{
+    "reasoning": "Your strategy",
+    "queries": [
+        {{
+            "query": "natural language question here",
+            "tool": "general_search",
+            "completes_task_id": "task_xxx",
+            "task_description": "brief description",
+            "rationale": "rationale",
+            "priority": 8
+        }}
+    ]
+}}
+
+⚠️ REQUIRED: Every query MUST have a "tool" field ("general_search")!
+Generate {len(tasks)} queries, one for each task.
+"""
+
+        try:
+            # Use LLM to create task-driven plan
+            from llm_clients import get_async_llm_client
+
+            provider = getattr(state, "llm_provider", "google")
+            model = getattr(state, "llm_model", "gemini-2.5-pro")
+
+            llm = await get_async_llm_client(provider, model)
+
+            messages = [{"role": "user", "content": planning_prompt}]
+
+            response = await llm.ainvoke(messages)
+
+            # Parse response
+            import json
+            import re
+
+            response_text = (
+                response.content if hasattr(response, "content") else str(response)
+            )
+
+            # Extract JSON from response
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if json_match:
+                plan_data = json.loads(json_match.group())
+
+                self.logger.info(
+                    f"[TASK_PLANNING] Strategy: {plan_data.get('reasoning', '')}"
+                )
+
+                # Convert to research plan format with task mappings
+                subtasks = []
+                for query_item in plan_data.get("queries", []):
+                    # Get tool from LLM response
+                    tool = query_item.get("tool", "general_search")
+                    # Map to source_type
+                    source_type = "general"
+
+                    self.logger.info(
+                        f"[TASK_PLANNING] Query tool selection: tool={tool}, source_type={source_type}, query={query_item['query'][:60]}..."
+                    )
+
+                    subtasks.append(
+                        {
+                            "index": len(subtasks),
+                            "type": "search",
+                            "query": query_item["query"],
+                            "description": query_item.get(
+                                "task_description", query_item["query"]
+                            ),
+                            "source_type": source_type,  # Use LLM's tool selection
+                            "priority": "high",
+                            "completes_task_id": query_item[
+                                "completes_task_id"
+                            ],  # KEY: Task tracking
+                            "task_rationale": query_item.get("rationale", ""),
+                        }
+                    )
+
+                self.logger.info(
+                    f"[TASK_PLANNING] Created {len(subtasks)} task-driven search queries"
+                )
+
+                # Log the task → query mappings
+                for subtask in subtasks:
+                    self.logger.info(
+                        f"[TASK_PLANNING]   Query: '{subtask['query'][:60]}...' → Task: {subtask['completes_task_id']}"
+                    )
+
+                return {
+                    "topic_complexity": "task_driven",
+                    "subtasks": subtasks,
+                    "task_planning_strategy": plan_data.get("reasoning", ""),
+                    "tasks_targeted": [t.id for t in tasks],
+                }
+            else:
+                self.logger.warning("[TASK_PLANNING] Failed to parse LLM response")
+
+        except Exception as e:
+            self.logger.error(f"[TASK_PLANNING] Error: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+        # Fallback: create simple queries from task descriptions
+        self.logger.info(
+            "[TASK_PLANNING] Using fallback: extract queries from task descriptions"
+        )
+        subtasks = []
+        for i, task in enumerate(tasks):
+            query = state.steering_todo.extract_search_query_from_task(task.description)
+            subtasks.append(
+                {
+                    "index": i,
+                    "type": "search",
+                    "query": f"{query} {query}",
+                    "description": task.description,
+                    "source_type": "general",
+                    "priority": "high",
+                    "completes_task_id": task.id,
+                    "task_rationale": "Fallback: extracted from task description",
+                }
+            )
+
+        return {
+            "topic_complexity": "task_driven",
+            "subtasks": subtasks,
+            "task_planning_strategy": "Fallback to simple extraction",
+            "tasks_targeted": [t.id for t in tasks],
+        }
+
+    async def plan_adaptive_research(
+        self,
+        query,
+        knowledge_gap,
+        research_loop_count,
+        uploaded_knowledge=None,
+        steering_guidance="",
+        todo_plan="",
+        state=None,
+    ):
+        """
+        Create an adaptive research plan that considers steering guidance and todo.md.
+
+        This method implements Cursor/Claude-style adaptive planning where the agent
+        dynamically adjusts its approach based on user feedback and current context.
+
+        Args:
+            query: The main research query or topic
+            knowledge_gap: Additional context about knowledge gaps to address
+            research_loop_count: Current iteration of research loop
+            uploaded_knowledge: User-provided external knowledge (optional)
+            steering_guidance: Current loop guidance from steering system
+            todo_plan: Current todo.md plan content
+            state: Research state for context
+
+        Returns:
+            Dict containing the adaptive research plan with tasks for specialized agents
+        """
+        self.logger.info(
+            f"[ADAPTIVE_PLANNING] Starting adaptive planning for loop {research_loop_count}"
+        )
+
+        # Get research history context
+        research_context = ""
+        if state:
+            research_context = f"""
+Research History:
+- Loop: {research_loop_count}
+- Previous summary: {state.running_summary[-1000:] if state.running_summary else 'None'}
+- Sources gathered: {len(state.sources_gathered)} sources
+- Knowledge gap: {knowledge_gap}
+"""
+
+        # Create adaptive planning prompt
+        adaptive_prompt = f"""
+You are an adaptive research planning agent. Your job is to create the next set of research actions based on:
+
+1. CURRENT RESEARCH CONTEXT:
+{research_context}
+
+2. USER STEERING GUIDANCE:
+{steering_guidance}
+
+3. CURRENT TODO PLAN:
+{todo_plan}
+
+4. ORIGINAL QUERY: {query}
+
+TASK: Based on the above context, determine what specific research actions should be taken next. 
+Consider:
+- What the user has specifically requested via steering messages
+- What tasks in the todo.md are highest priority
+- What gaps exist in the current research
+- What searches or tools would be most valuable right now
+
+You should adapt your approach like Cursor or Claude - if the user says "focus on recent work", 
+prioritize recent publications. If they say "exclude entertainment", avoid entertainment-related searches.
+
+Generate a focused research plan with 2-4 specific, targeted search queries that directly address 
+the user's steering guidance and todo priorities.
+
+Respond with a JSON object containing:
+{{
+    "reasoning": "Brief explanation of your adaptive strategy",
+    "priority_focus": "What you're prioritizing based on steering",
+    "search_queries": ["specific search query 1", "specific search query 2", ...],
+    "adaptations_made": ["adaptation 1", "adaptation 2", ...]
+}}
+"""
+
+        try:
+            # Use LLM to create adaptive plan
+            from llm_clients import get_async_llm_client
+
+            llm_client = get_async_llm_client(provider="google")
+
+            response = await llm_client.generate_async(
+                prompt=adaptive_prompt, max_tokens=1000, temperature=0.3
+            )
+
+            # Parse the response
+            import json
+            import re
+
+            # Extract JSON from response
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
+            if json_match:
+                adaptive_plan = json.loads(json_match.group())
+
+                self.logger.info(
+                    f"[ADAPTIVE_PLANNING] Reasoning: {adaptive_plan.get('reasoning', '')}"
+                )
+                self.logger.info(
+                    f"[ADAPTIVE_PLANNING] Priority Focus: {adaptive_plan.get('priority_focus', '')}"
+                )
+                self.logger.info(
+                    f"[ADAPTIVE_PLANNING] Adaptations: {adaptive_plan.get('adaptations_made', [])}"
+                )
+
+                # Convert to research plan format
+                subtasks = []
+                for i, search_query in enumerate(
+                    adaptive_plan.get("search_queries", [])
+                ):
+                    subtasks.append(
+                        {
+                            "index": i,
+                            "type": "search",
+                            "query": search_query,
+                            "description": f"Adaptive search: {search_query}",
+                            "source_type": "general",
+                            "priority": "high",
+                            "steering_adapted": True,
+                            "adaptation_reason": adaptive_plan.get("reasoning", ""),
+                        }
+                    )
+
+                return {
+                    "topic_complexity": "adaptive",
+                    "subtasks": subtasks,
+                    "adaptive_reasoning": adaptive_plan.get("reasoning", ""),
+                    "priority_focus": adaptive_plan.get("priority_focus", ""),
+                    "adaptations_made": adaptive_plan.get("adaptations_made", []),
+                    "steering_guidance_used": steering_guidance,
+                    "todo_plan_considered": bool(todo_plan),
+                }
+
+            else:
+                self.logger.warning(
+                    "[ADAPTIVE_PLANNING] Failed to parse LLM response, falling back to original planning"
+                )
+
+        except Exception as e:
+            self.logger.error(f"[ADAPTIVE_PLANNING] Error in adaptive planning: {e}")
+
+        # Fallback to original planning if adaptive planning fails
+        self.logger.info("[ADAPTIVE_PLANNING] Falling back to original planning method")
+        return await self.plan_research(
+            query, knowledge_gap, research_loop_count, uploaded_knowledge
+        )
 
     async def execute_research(self, state, callbacks=None, database_info=None):
         """
@@ -574,10 +955,27 @@ Query Generation Strategy:
         """
         # Store state for access by all methods in this execution
         self.state = state
-        self.database_info = database_info
+
+        # Step 1: Create initial research plan as todo items if steering is enabled
+        if hasattr(state, "steering_todo") and state.steering_todo:
+            await self._create_initial_research_plan(state)
+            self.logger.info(f"[STEERING] Created initial research plan")
 
         try:
+            # Initialize visualization tracking variables
+            viz_tasks_created_this_loop = 0
+            total_viz_in_state = (
+                len(state.visualizations)
+                if hasattr(state, "visualizations") and state.visualizations
+                else 0
+            )
+            # 5 or 1
+            max_viz_for_this_loop = self._get_max_viz_for_loop(
+                state.research_loop_count
+            )
+
             # Always get query, knowledge_gap, and loop_count from state for planning
+            # Use refined search_query if available, otherwise the original research_topic
             query = (
                 state.search_query
                 if hasattr(state, "search_query") and state.search_query
@@ -587,9 +985,77 @@ Query Generation Strategy:
             research_loop_count = getattr(state, "research_loop_count", 0)
             uploaded_knowledge = getattr(state, "uploaded_knowledge", None)
 
+            # Log all tasks at start of research loop
+            if hasattr(state, "steering_todo") and state.steering_todo:
+                logger.info("\n" + "=" * 80)
+                logger.info(f"[RESEARCH LOOP {research_loop_count}] TASK STATUS SNAPSHOT")
+                logger.info("=" * 80)
+
+                from src.simple_steering import TaskStatus
+
+                pending = [
+                    t
+                    for t in state.steering_todo.tasks.values()
+                    if t.status == TaskStatus.PENDING
+                ]
+                in_progress = [
+                    t
+                    for t in state.steering_todo.tasks.values()
+                    if t.status == TaskStatus.IN_PROGRESS
+                ]
+                completed = [
+                    t
+                    for t in state.steering_todo.tasks.values()
+                    if t.status == TaskStatus.COMPLETED
+                ]
+                cancelled = [
+                    t
+                    for t in state.steering_todo.tasks.values()
+                    if t.status == TaskStatus.CANCELLED
+                ]
+
+                logger.info(
+                    f"\n📊 SUMMARY: {len(pending)} pending | {len(in_progress)} in-progress | {len(completed)} completed | {len(cancelled)} cancelled"
+                )
+
+                if pending:
+                    logger.info(f"\n🎯 PENDING TASKS ({len(pending)}):")
+                    for task in sorted(pending, key=lambda t: t.priority, reverse=True):
+                        logger.info(
+                            f"  [ ] [{task.id}] P{task.priority} - {task.description[:80]}"
+                        )
+
+                if in_progress:
+                    logger.info(f"\n🔄 IN PROGRESS ({len(in_progress)}):")
+                    for task in in_progress:
+                        logger.info(f"  ⏳ [{task.id}] - {task.description[:80]}")
+
+                if completed:
+                    logger.info(f"\n✅ COMPLETED ({len(completed)}):")
+                    for task in completed:  # Show ALL
+                        logger.info(f"  ✓ [{task.id}] - {task.description[:80]}")
+
+                if cancelled:
+                    logger.info(f"\n❌ CANCELLED ({len(cancelled)}):")
+                    for task in cancelled:  # Show ALL
+                        logger.info(f"  ✗ [{task.id}] - {task.description[:80]}")
+
+                logger.info("=" * 80 + "\n")
+
             self.logger.info(
                 f"[MasterAgent.execute_research] Planning with query: '{query[:100]}...'"
             )
+
+            # Log uploaded knowledge availability
+            if uploaded_knowledge and uploaded_knowledge.strip():
+                self.logger.info(
+                    f"[MasterAgent.execute_research] Uploaded knowledge available: {len(uploaded_knowledge)} characters"
+                )
+            else:
+                self.logger.info(
+                    "[MasterAgent.execute_research] No uploaded knowledge available"
+                )
+
 
             research_plan = None
             if (
@@ -598,37 +1064,190 @@ Query Generation Strategy:
                 and research_loop_count == 0
             ):
                 # Only use existing plan if it's the very first loop AND a plan was somehow pre-loaded
+                # Otherwise, always re-plan to use the latest query/knowledge_gap
                 research_plan = state.research_plan
-                print(
+                logger.info(
                     "[execute_research] Using pre-existing research plan for initial loop"
                 )
 
             # If no pre-existing plan for loop 0, or if it's a subsequent loop, always (re)plan.
             if not research_plan or research_loop_count > 0:
                 if research_loop_count > 0:
-                    print(
+                    logger.info(
                         f"[execute_research] Re-planning research for loop {research_loop_count}."
                     )
                 else:
-                    print("[execute_research] Creating initial research plan.")
+                    logger.info("[execute_research] Creating initial research plan.")
 
-                research_plan = await self.plan_research(
-                    query, knowledge_gap, research_loop_count, uploaded_knowledge
-                )
+                # Step 2: Process any pending steering messages and update todo.md
+                # This happens at the beginning of each research loop to incorporate user guidance
+                if hasattr(state, "steering_todo") and state.steering_todo:
+                    steering_result = await state.prepare_steering_for_next_loop()
+                    if steering_result.get("steering_enabled"):
+                        self.logger.info(
+                            f"[STEERING] Prepared todo.md for loop {state.research_loop_count}:"
+                        )
+                        self.logger.info(
+                            f"  - Todo version: {steering_result.get('todo_version')}"
+                        )
+                        self.logger.info(
+                            f"  - Pending tasks: {steering_result.get('pending_tasks')}"
+                        )
+                        self.logger.info(
+                            f"  - Loop guidance: {steering_result.get('loop_guidance', 'None')}"
+                        )
+                        logger.info(
+                            f"  - Completed tasks: {steering_result.get('completed_tasks')}"
+                        )
+                        logger.info(
+                            f"  - Queue processed: {steering_result.get('todo_updated')}"
+                        )
+
+                        # Show current loop guidance
+                        loop_guidance = steering_result.get("loop_guidance", "")
+                        if loop_guidance:
+                            logger.info(
+                                f"\n[STEERING] Current Loop Guidance:\n{loop_guidance}"
+                            )
+
+                        # Show snippet of current plan
+                        current_plan = steering_result.get("current_plan", "")
+                        if current_plan:
+                            plan_lines = current_plan.split("\n")
+                            logger.info(f"\n[STEERING] Updated todo.md (first 10 lines):")
+                            for line in plan_lines[:10]:
+                                logger.info(f"  {line}")
+                            if len(plan_lines) > 10:
+                                logger.info(f"  ... ({len(plan_lines) - 10} more lines)")
+                    else:
+                        # Legacy behavior for existing code
+                        await self._process_pending_steering_messages(state)
+                        current_plan = state.get_steering_plan()
+                        logger.info(
+                            f"[STEERING] Current todo.md plan:\n{current_plan[:500]}..."
+                        )
+
+                # Step 3: Create research plan - TASK-DRIVEN if we have pending tasks
+                if hasattr(state, "steering_todo") and state.steering_todo:
+                    # Get pending tasks
+                    pending_tasks = state.steering_todo.get_pending_tasks()
+
+                    if pending_tasks:
+                        # Sort by priority (highest first)
+                        pending_tasks.sort(key=lambda t: t.priority, reverse=True)
+
+                        # Take top 3-4 tasks for this loop (like Manus AI's iterative approach)
+                        top_tasks = pending_tasks[: min(4, len(pending_tasks))]
+
+                        self.logger.info(
+                            f"[STEERING] Found {len(pending_tasks)} pending tasks, targeting top {len(top_tasks)} this loop"
+                        )
+
+                        # Mark tasks as in-progress
+                        for task in top_tasks:
+                            state.steering_todo.mark_task_in_progress(task.id)
+
+                        # Use TASK-DRIVEN planning (explicit task → query mapping)
+                        research_plan = await self.plan_research_from_tasks(
+                            query=query,
+                            tasks=top_tasks,
+                            knowledge_gap=knowledge_gap,
+                            research_loop_count=research_loop_count,
+                            state=state,
+                        )
+
+                        self.logger.info(
+                            f"[TASK_PLANNING] Created task-driven plan with {len(research_plan.get('subtasks', []))} queries"
+                        )
+                    else:
+                        # No pending tasks - use adaptive planning
+                        self.logger.info(
+                            "[STEERING] No pending tasks, using adaptive planning"
+                        )
+                        loop_guidance = state.steering_todo.get_current_loop_guidance()
+                        todo_md = state.steering_todo.get_todo_md()
+
+                        research_plan = await self.plan_adaptive_research(
+                            query,
+                            knowledge_gap,
+                            research_loop_count,
+                            uploaded_knowledge,
+                            steering_guidance=loop_guidance,
+                            todo_plan=todo_md,
+                            state=state,
+                        )
+                else:
+                    # No steering - fallback to original planning
+                    research_plan = await self.plan_research(
+                        query, knowledge_gap, research_loop_count, uploaded_knowledge
+                    )
 
                 # Add/update the research plan in state if possible
                 try:
                     state.research_plan = research_plan
-                    print("[execute_research] Updated research plan in state")
+                    logger.info("[execute_research] Updated research plan in state")
                 except (ValueError, AttributeError):
-                    print(
+                    logger.info(
                         "[execute_research] Unable to update research plan in state, using local copy"
                     )
 
             # Execute search tasks
             search_results_list = await self._execute_search_tasks(
                 research_plan, state
-            )
+            )  # Renamed to avoid conflict
+
+            if hasattr(state, "steering_todo") and state.steering_todo:
+                plan_complexity = research_plan.get("topic_complexity", "")
+
+                if plan_complexity == "task_driven":
+                    # For task-driven plans, we have explicit task → query mappings
+                    self.logger.info(
+                        "[TASK_COMPLETION] Checking task completion based on search results"
+                    )
+
+                    for subtask in research_plan.get("subtasks", []):
+                        task_id = subtask.get("completes_task_id")
+                        if not task_id:
+                            continue
+
+                        # Find corresponding search result
+                        subtask_index = subtask.get("index", -1)
+                        if subtask_index < len(search_results_list):
+                            search_result = search_results_list[subtask_index]
+
+                            # Check if search was successful and has content
+                            if search_result.get("success", False):
+                                has_content = bool(
+                                    search_result.get("content")
+                                    or search_result.get("sources", [])
+                                )
+
+                                if has_content:
+                                    # Mark task as COMPLETED
+                                    state.steering_todo.mark_task_completed(
+                                        task_id=task_id,
+                                        completion_note=f"✓ Found via search: '{subtask['query'][:50]}...'",
+                                    )
+                                    self.logger.info(
+                                        f"[TASK_COMPLETION] ✓ Task {task_id} completed successfully"
+                                    )
+                                else:
+                                    # Search succeeded but found nothing - cancel task or leave pending
+                                    self.logger.warning(
+                                        f"[TASK_COMPLETION] ⚠ Search for task {task_id} returned no results"
+                                    )
+                            else:
+                                # Search failed - leave task in progress, will retry
+                                error_msg = search_result.get("error", "Unknown error")
+                                self.logger.warning(
+                                    f"[TASK_COMPLETION] ✗ Search for task {task_id} failed: {error_msg}"
+                                )
+
+                elif plan_complexity == "adaptive":
+                    # For adaptive plans, use existing heuristic-based completion
+                    await self._update_todo_based_on_results(
+                        research_plan, search_results_list, state
+                    )
 
             successful_search_indices = [
                 i
@@ -640,12 +1259,152 @@ Query Generation Strategy:
                 f"[MasterAgent] Completed {len(successful_search_indices)} successful search tasks out of {len(search_results_list)}."
             )
 
+            # Initialize lists to store visualization outputs from this loop
+            visualizations_generated_this_loop = []
+            base64_images_generated_this_loop = []
+            code_snippets_generated_this_loop = []
+
+            # Skip visualization tasks in QA mode or benchmark mode
+            if state.qa_mode or state.benchmark_mode:
+                mode_name = "QA mode" if state.qa_mode else "benchmark mode"
+                self.logger.info(
+                    f"[MasterAgent] Skipping visualization tasks because {mode_name} is enabled."
+                )
+            elif state.visualization_disabled:
+                self.logger.info(
+                    "[MasterAgent] Skipping visualization tasks because visualization mode is disabled."
+                )
+            # do visualization tasks
+            else:
+                self.logger.info(
+                    f"[MasterAgent] Attempting to generate visualizations. Max for this loop: {max_viz_for_this_loop}"
+                )
+                visualization_agent = VisualizationAgent(self.config)
+
+                for i, search_result_item in enumerate(search_results_list):
+                    if not search_result_item.get("success", False):
+                        continue  # Skip failed search tasks
+
+                    if viz_tasks_created_this_loop >= max_viz_for_this_loop:
+                        self.logger.info(
+                            f"[MasterAgent] Reached max visualizations ({max_viz_for_this_loop}) for this loop."
+                        )
+                        break
+
+                    self.logger.info(
+                        f"[MasterAgent] Considering search result index {search_result_item.get('index')} for visualization."
+                    )
+
+                    # Pass the actual search result content to determine_visualization_needs
+                    # search_result_item is already a dict like {'index': ..., 'query': ..., 'success': ..., 'content': ..., 'sources': ..., 'error': ...}
+                    vis_needs = await visualization_agent.determine_visualization_needs(
+                        search_result_item
+                    )
+
+                    if vis_needs and vis_needs.get("visualization_needed"):
+                        self.logger.info(
+                            f"[MasterAgent] Visualization needed for search result index {search_result_item.get('index')}. Rationale: {vis_needs.get('rationale')}"
+                        )
+                        code_data = (
+                            await visualization_agent.generate_visualization_code(
+                                search_result_item, vis_needs
+                            )
+                        )
+
+                        if code_data and code_data.get("code"):
+                            execution_output = (
+                                await visualization_agent.execute_visualization_code(
+                                    code_data
+                                )
+                            )
+
+                            if execution_output and not execution_output.get("error"):
+                                viz_tasks_created_this_loop += 1
+                                # execution_output["results"] is a list of dicts like:
+                                # [{"type": "image", "filepath": "path/to/img.png", "filename": "img.png", "description": "desc", "format": "png", "data": "base64data", "src": "datauri"}]
+                                generated_visualizations = execution_output.get(
+                                    "results", []
+                                )
+                                visualizations_generated_this_loop.extend(
+                                    generated_visualizations
+                                )
+
+                                # Extract base64 data for state
+                                for viz_item_detail in generated_visualizations:
+                                    if viz_item_detail.get(
+                                        "data"
+                                    ) and viz_item_detail.get("filename"):
+                                        base64_images_generated_this_loop.append(
+                                            {
+                                                "filename": viz_item_detail.get(
+                                                    "filename"
+                                                ),
+                                                "title": viz_item_detail.get(
+                                                    "description"
+                                                )
+                                                or viz_item_detail.get(
+                                                    "filename"
+                                                ),  # Use description or filename as title
+                                                "base64_data": viz_item_detail.get(
+                                                    "data"
+                                                ),
+                                                "format": viz_item_detail.get(
+                                                    "format", "png"
+                                                ),
+                                            }
+                                        )
+                                # Collect code snippets
+                                if execution_output.get("code_snippets"):
+                                    code_snippets_generated_this_loop.extend(
+                                        execution_output.get("code_snippets", [])
+                                    )
+                                elif code_data.get(
+                                    "code_snippets"
+                                ):  # Fallback to code_data if not in execution_output
+                                    code_snippets_generated_this_loop.extend(
+                                        code_data.get("code_snippets", [])
+                                    )
+
+                                self.logger.info(
+                                    f"[MasterAgent] Successfully generated {len(generated_visualizations)} visualizations for search result index {search_result_item.get('index')}."
+                                )
+                            elif execution_output and execution_output.get("error"):
+                                self.logger.error(
+                                    f"[MasterAgent] Error executing visualization code for search result index {search_result_item.get('index')}: {execution_output.get('error')}"
+                                )
+                                # Collect code snippets even on error
+                                if execution_output.get("code_snippets"):
+                                    code_snippets_generated_this_loop.extend(
+                                        execution_output.get("code_snippets", [])
+                                    )
+                                elif code_data and code_data.get("code_snippets"):
+                                    code_snippets_generated_this_loop.extend(
+                                        code_data.get("code_snippets", [])
+                                    )
+                        else:
+                            self.logger.info(
+                                f"[MasterAgent] No visualization code generated for search result index {search_result_item.get('index')}."
+                            )
+                    else:
+                        self.logger.info(
+                            f"[MasterAgent] No visualization deemed necessary for search result index {search_result_item.get('index')}. Rationale: {vis_needs.get('rationale') if vis_needs else 'No vis_needs determined'}"
+                        )
+
+            self.logger.info(
+                f"[MasterAgent] Generated {viz_tasks_created_this_loop} visualization(s) in this loop. Total viz in state (before this loop): {total_viz_in_state}"
+            )
+
             # Prepare the return dictionary
+            # The primary output is still the search_results_list
+            # We add new keys for the visualization outputs from this loop.
             return_value = {
-                "web_research_results": search_results_list,
-                "visualizations_generated_this_loop": [],
-                "base64_images_generated_this_loop": [],
-                "code_snippets_generated_this_loop": [],
+                "web_research_results": search_results_list,  # This is what subsequent nodes expect
+                "visualizations_generated_this_loop": visualizations_generated_this_loop,
+                "base64_images_generated_this_loop": base64_images_generated_this_loop,
+                "code_snippets_generated_this_loop": code_snippets_generated_this_loop,
+                # Ensure other state fields are preserved if they were part of the input `state`
+                # This is crucial if `execute_research` is expected to return a full state-like dict
+                # For now, focusing on returning the direct outputs of this agent's actions.
             }
             # Preserve essential state fields that might have been updated by planning
             if hasattr(state, "research_plan"):
@@ -656,17 +1415,34 @@ Query Generation Strategy:
         except Exception as e:
             self.logger.error(f"[MasterAgent] Error in research execution: {str(e)}")
             self.logger.error(f"[MasterAgent] {traceback.format_exc()}")
+            # Return search_results_list even in case of error to allow flow to continue if possible
+            # And add error information.
             return {
                 "web_research_results": getattr(
                     self, "search_results_list", []
-                ),
+                ),  # search_results_list might not be defined if error is early
                 "error": f"MasterAgent execution failed: {str(e)}",
                 "visualizations_generated_this_loop": [],
                 "base64_images_generated_this_loop": [],
                 "code_snippets_generated_this_loop": [],
             }
 
+    def _get_max_viz_for_loop(self, research_loop_count):
+        """
+        Determine the maximum number of visualizations allowed for a given research loop.
 
+        Args:
+            research_loop_count: Current research loop iteration
+
+        Returns:
+            int: Maximum number of visualizations allowed for this loop
+        """
+        if research_loop_count == 0:
+            # Allow more visualizations in the initial loop
+            return 5  # Up to 5 in first loop
+        else:
+            # Allow fewer visualizations in subsequent loops
+            return 1  # Only 1 in later loops
 
     async def _execute_search_tasks(self, research_plan, state):
         """
@@ -684,228 +1460,587 @@ Query Generation Strategy:
 
         # State is accessible via self.state set in execute_research
 
+        # Track if we're in benchmark mode
+        benchmark_mode = getattr(state, "benchmark_mode", False)
+        if benchmark_mode:
+            logger.info(f"[_execute_search_tasks] Executing search tasks in benchmark mode")
 
         visualization_disabled = getattr(state, "visualization_disabled", False)
         if visualization_disabled:
-            print(
+            logger.info(
                 f"[_execute_search_tasks] Executing search tasks in visualization disabled mode"
             )
 
         # Initialize specialized agents and tools
-        search_agent = SearchAgent(self.config, database_info=self.database_info)
+        search_agent = SearchAgent(self.config)
 
-        # Initialize task results list to track what's completed
-        task_results = []
+        # Initialize result mapping to track completion by subtask index
+        task_results_map = {}
 
         # If there are no research tasks, exit early
         if "subtasks" not in research_plan or not research_plan["subtasks"]:
-            print("No search tasks found in research plan.")
-            return task_results
+            logger.info("No search tasks found in research plan.")
+            return []
 
-        # Loop through each search task
-        for task in research_plan["subtasks"]:
-            if task.get("type") == "search":
-                task_index = task.get("index", 0)
-                task_query = task.get("query", {})
+        def _build_skipped_result(
+            task_index: int,
+            query_text: str,
+            tool_name: str,
+            reason: str,
+        ) -> Dict[str, Any]:
+            return {
+                "index": task_index,
+                "query": query_text,
+                "success": False,
+                "content": "",
+                "sources": [],
+                "error": reason,
+                "tool_used": tool_name,
+                "skipped": True,
+            }
 
-                # Handle both string and dict query formats
-                if isinstance(task_query, str):
-                    # If query is a string, use it directly
-                    query_text = task_query
-                    tool_name = task.get("source_type", "general_search")
-                    # Map source_type to tool names
-                    if tool_name == "general":
-                        tool_name = "general_search"
-                    elif tool_name == "academic":
-                        tool_name = "academic_search"
-                    elif tool_name == "github":
-                        tool_name = "github_search"
-                    elif tool_name == "linkedin":
-                        tool_name = "linkedin_search"
-                    elif tool_name == "text2sql":
-                        tool_name = "text2sql"
-                    else:
-                        tool_name = "general_search"  # Default fallback
+        async def _execute_single_task(
+            task_index: int, query_text: str, tool_name: str
+        ) -> Dict[str, Any]:
+            # Log this to help with tracing
+            logger.info(f"Executing search task {task_index} with query: '{query_text}'")
+            logger.info(f"Using search tool: {tool_name}")
 
-                    # WORKAROUND: If database_info is available and query contains SQL, use text2sql
-                    if (
-                        hasattr(self, "database_info")
-                        and self.database_info
-                        and (
-                            "SELECT" in query_text.upper()
-                            or "FROM" in query_text.upper()
-                            or "JOIN" in query_text.upper()
-                        )
-                    ):
-                        self.logger.info(
-                            f"[MasterAgent._execute_search_tasks] Detected SQL query, switching to text2sql tool"
-                        )
-                        tool_name = "text2sql"
-                elif isinstance(task_query, dict):
-                    # If query is a dict, extract the query text and tool
-                    query_text = task_query.get("query", "")
-                    tool_name = task_query.get("suggested_tool", "general_search")
+            try:
+                # Execute the search based on the tool_name
+                search_result = None
+                if tool_name == "general_search":
+                    search_result = await search_agent.general_search(query_text)
+                elif tool_name == "academic_search":
+                    search_result = await search_agent.academic_search(query_text)
+                elif tool_name == "github_search":
+                    search_result = await search_agent.github_search(query_text)
+                elif tool_name == "linkedin_search":
+                    search_result = await search_agent.linkedin_search(query_text)
                 else:
-                    # Fallback for unexpected format
-                    query_text = str(task_query)
-                    tool_name = "general_search"
+                    # Default to general search if tool is unknown
+                    search_result = await search_agent.general_search(query_text)
 
-
-
-                # Log this to help with tracing
-                print(f"Executing search task {task_index} with query: '{query_text}'")
-                print(f"Using search tool: {tool_name}")
-
+                # Log search tool call for trajectory capture (non-invasive, never fails research)
                 try:
-                    # Execute the search based on the tool_name
-                    search_result = None
-                    if tool_name == "general_search":
-                        search_result = await search_agent.general_search(query_text)
-                    elif tool_name == "academic_search":
-                        search_result = await search_agent.academic_search(query_text)
-                    elif tool_name == "github_search":
-                        search_result = await search_agent.github_search(query_text)
-                    elif tool_name == "linkedin_search":
-                        search_result = await search_agent.linkedin_search(query_text)
-                    elif tool_name == "text2sql":
-                        # Handle text2sql tool execution
-                        search_result = await search_agent.text2sql_search(query_text)
-                    else:
-                        # Default to general search if tool is unknown
-                        search_result = await search_agent.general_search(query_text)
-
-                    # Log search tool call for trajectory capture (non-invasive, never fails research)
-                    try:
-                        if hasattr(self, "state") and self.state:
-                            num_sources = 0
-                            sources_list = []
-                            if isinstance(search_result, dict):
-                                if "formatted_sources" in search_result:
-                                    sources_list = search_result.get(
-                                        "formatted_sources", []
-                                    )
-                                    num_sources = len(sources_list)
-                                elif "sources" in search_result:
-                                    sources_list = search_result.get("sources", [])
-                                    num_sources = len(sources_list)
-
-                            self.state.log_tool_call(
-                                tool_name=tool_name,
-                                params={"query": query_text},
-                                result_summary=f"{num_sources} sources",
-                            )
-
-                            # Log complete execution step
-                            self.state.log_execution_step(
-                                step_type="tool_execution",
-                                action=tool_name,
-                                input_data={"query": query_text},
-                                output_data={
-                                    "num_sources": num_sources,
-                                    "sources": (
-                                        sources_list[:10]
-                                        if len(sources_list) > 10
-                                        else sources_list
-                                    ),  # First 10 sources
-                                },
-                                metadata={"total_sources": num_sources},
-                            )
-                    except Exception:
-                        pass  # Logging errors should never break research
-
-                    # Extract sources from search_result for easy access in results
-                    sources = []
-
-                    # Handle different search_result formats
-                    if isinstance(search_result, dict):
-                        # Format from newer search tools that return a dict with 'formatted_sources'
-                        if "formatted_sources" in search_result:
-                            formatted_sources = search_result.get(
-                                "formatted_sources", []
-                            )
-                            # Extract source details from formatted_sources
-                            for src in formatted_sources:
-                                if isinstance(src, str) and " : " in src:
-                                    # Parse title and URL from source string (format: "title : url")
-                                    parts = src.split(" : ", 1)
-                                    if len(parts) == 2:
-                                        title, url = parts
-                                        sources.append({"title": title, "url": url})
-
-                        # If search_result directly contains 'sources' key with structured data
-                        if "sources" in search_result and isinstance(
-                            search_result["sources"], list
-                        ):
-                            for src in search_result["sources"]:
-                                if (
-                                    isinstance(src, dict)
-                                    and "title" in src
-                                    and "url" in src
-                                ):
-                                    sources.append(
-                                        {"title": src["title"], "url": src["url"]}
-                                    )
-
-                        # Extract content from search_result
-                        if "content" in search_result:
-                            content = search_result["content"]
-                        elif "raw_contents" in search_result:
-                            # Join multiple raw contents into a single string
-                            raw_contents = search_result.get("raw_contents", [])
-                            if isinstance(raw_contents, list):
-                                content = "\n\n".join(
-                                    [str(item) for item in raw_contents if item]
+                    if hasattr(self, "state") and self.state:
+                        num_sources = 0
+                        sources_list = []
+                        if isinstance(search_result, dict):
+                            if "formatted_sources" in search_result:
+                                sources_list = search_result.get(
+                                    "formatted_sources", []
                                 )
-                            else:
-                                content = str(raw_contents)
+                                num_sources = len(sources_list)
+                            elif "sources" in search_result:
+                                sources_list = search_result.get("sources", [])
+                                num_sources = len(sources_list)
+
+                        self.state.log_tool_call(
+                            tool_name=tool_name,
+                            params={"query": query_text},
+                            result_summary=f"{num_sources} sources",
+                        )
+
+                        # Log complete execution step
+                        self.state.log_execution_step(
+                            step_type="tool_execution",
+                            action=tool_name,
+                            input_data={"query": query_text},
+                            output_data={
+                                "num_sources": num_sources,
+                                "sources": (
+                                    sources_list[:10]
+                                    if len(sources_list) > 10
+                                    else sources_list
+                                ),  # First 10 sources
+                            },
+                            metadata={"total_sources": num_sources},
+                        )
+                except Exception:
+                    pass  # Logging errors should never break research
+
+                # Extract sources from search_result for easy access in results
+                sources = []
+
+                # Handle different search_result formats
+                if isinstance(search_result, dict):
+                    # Format from newer search tools that return a dict with 'formatted_sources'
+                    if "formatted_sources" in search_result:
+                        formatted_sources = search_result.get(
+                            "formatted_sources", []
+                        )
+                        # Extract source details from formatted_sources
+                        for src in formatted_sources:
+                            if isinstance(src, str) and " : " in src:
+                                # Parse title and URL from source string (format: "title : url")
+                                parts = src.split(" : ", 1)
+                                if len(parts) == 2:
+                                    title, url = parts
+                                    sources.append({"title": title, "url": url})
+
+                    # If search_result directly contains 'sources' key with structured data
+                    if "sources" in search_result and isinstance(
+                        search_result["sources"], list
+                    ):
+                        for src in search_result["sources"]:
+                            if (
+                                isinstance(src, dict)
+                                and "title" in src
+                                and "url" in src
+                            ):
+                                sources.append(
+                                    {"title": src["title"], "url": src["url"]}
+                                )
+
+                    # Extract content from search_result
+                    if "content" in search_result:
+                        content = search_result["content"]
+                    elif "raw_contents" in search_result:
+                        # Join multiple raw contents into a single string
+                        raw_contents = search_result.get("raw_contents", [])
+                        if isinstance(raw_contents, list):
+                            content = "\n\n".join(
+                                [str(item) for item in raw_contents if item]
+                            )
                         else:
-                            # Fallback: convert the entire result to a string
-                            content = str(search_result)
+                            content = str(raw_contents)
                     else:
-                        # Fallback for unexpected search_result type
+                        # Fallback: convert the entire result to a string
                         content = str(search_result)
-                        # No sources can be extracted in this case
+                else:
+                    # Fallback for unexpected search_result type
+                    content = str(search_result)
+                    # No sources can be extracted in this case
 
-                    # Build the result object with both content and sources
-                    task_result = {
-                        "index": task_index,
-                        "query": query_text,  # Store the actual query text, not the original task_query
-                        "success": True,
-                        "content": content,
-                        "sources": sources,
-                        "error": None,
-                        "tool_used": tool_name,  # Include the tool used for tracking
-                    }
+                # Build the result object with both content and sources
+                task_result = {
+                    "index": task_index,
+                    "query": query_text,  # Store the actual query text, not the original task_query
+                    "success": True,
+                    "content": content,
+                    "sources": sources,
+                    "error": None,
+                    "tool_used": tool_name,  # Include the tool used for tracking
+                }
 
-                    print(
-                        f"Search task {task_index} completed with {len(sources)} sources"
+                logger.info(
+                    f"Search task {task_index} completed with {len(sources)} sources"
+                )
+
+                # Mark query as executed to prevent future duplicates
+                if (
+                    hasattr(self.state, "steering_todo")
+                    and self.state.steering_todo
+                ):
+                    self.state.steering_todo.mark_query_executed(query_text)
+                    self.logger.info(
+                        f"✓ [DEDUP] Marked query as executed: '{query_text[:60]}...'"
                     )
-                    task_results.append(task_result)
 
+                return task_result
 
+            except Exception as e:
+                # Log the error and continue with other tasks
+                logger.info(f"Error in search task {task_index}: {str(e)}")
+                return {
+                    "index": task_index,
+                    "query": query_text,  # Store the actual query text, not the original task_query
+                    "success": False,
+                    "content": "",
+                    "sources": [],
+                    "error": str(e),
+                    "tool_used": tool_name,  # Include the tool used for tracking even on error
+                }
 
-                except Exception as e:
-                    # Log the error and continue with other tasks
-                    print(f"Error in search task {task_index}: {str(e)}")
-                    error_result = {
-                        "index": task_index,
-                        "query": query_text,  # Store the actual query text, not the original task_query
-                        "success": False,
-                        "content": "",
-                        "sources": [],
-                        "error": str(e),
-                        "tool_used": tool_name,  # Include the tool used for tracking even on error
-                    }
-                    task_results.append(error_result)
+        async def _execute_with_semaphore(
+            semaphore: asyncio.Semaphore,
+            task_index: int,
+            query_text: str,
+            tool_name: str,
+        ) -> Dict[str, Any]:
+            async with semaphore:
+                return await _execute_single_task(
+                    task_index, query_text, tool_name
+                )
+
+        parallel_enabled = getattr(state, "parallel_search_enabled", False)
+        max_concurrency = getattr(state, "parallel_search_max_concurrency", 4)
+        if isinstance(getattr(state, "config", None), dict):
+            parallel_enabled = state.config.get(
+                "parallel_search_enabled", parallel_enabled
+            )
+            max_concurrency = state.config.get(
+                "parallel_search_max_concurrency", max_concurrency
+            )
+        if not isinstance(max_concurrency, int) or max_concurrency < 1:
+            max_concurrency = 1
+
+        parallel_tasks = []
+        sequential_tasks = []
+
+        # Loop through each search task and build execution lists
+        for task in research_plan["subtasks"]:
+            if task.get("type") != "search":
+                continue
+
+            task_index = task.get("index", 0)
+            task_query = task.get("query", {})
+
+            # Handle both string and dict query formats
+            if isinstance(task_query, str):
+                # If query is a string, use it directly
+                query_text = task_query
+                tool_name = task.get("source_type", "general_search")
+                # Map source_type to tool names
+                if tool_name == "general":
+                    tool_name = "general_search"
+                elif tool_name == "academic":
+                    tool_name = "academic_search"
+                elif tool_name == "github":
+                    tool_name = "github_search"
+                elif tool_name == "linkedin":
+                    tool_name = "linkedin_search"
+                else:
+                    tool_name = "general_search"  # Default fallback
+
+            elif isinstance(task_query, dict):
+                # If query is a dict, extract the query text and tool
+                query_text = task_query.get("query", "")
+                tool_name = task_query.get("suggested_tool", "general_search")
+            else:
+                # Fallback for unexpected format
+                query_text = str(task_query)
+                tool_name = "general_search"
+
+            # Step 3: Apply steering constraints to filter/modify queries
+            if hasattr(self.state, "steering_todo") and self.state.steering_todo:
+                # Check if this query should be cancelled due to steering
+                if self.state.steering_todo.should_cancel_search(query_text):
+                    logger.info(
+                        f"[STEERING] Cancelled search task {task_index}: '{query_text}' (filtered by constraints)"
+                    )
+                    task_results_map[task_index] = _build_skipped_result(
+                        task_index,
+                        query_text,
+                        tool_name,
+                        "cancelled_by_steering",
+                    )
+                    continue
+
+                # Check for duplicate queries (avoid redundant searches)
+                if self.state.steering_todo.is_query_duplicate(query_text):
+                    self.logger.debug(
+                        f"🔁 [DEDUP] Skipping duplicate query: '{query_text[:60]}...'"
+                    )
+                    logger.info(
+                        f"[STEERING] Skipped duplicate search task {task_index}: '{query_text}' (already executed)"
+                    )
+                    task_results_map[task_index] = _build_skipped_result(
+                        task_index,
+                        query_text,
+                        tool_name,
+                        "duplicate_query",
+                    )
+                    continue
+
+                # Apply priority boost if relevant
+                priority_boost = self.state.steering_todo.get_search_priority_boost(
+                    query_text
+                )
+                if priority_boost > 0:
+                    logger.info(
+                        f"[STEERING] Boosted priority for search task {task_index}: '{query_text}' (+{priority_boost})"
+                    )
+
+            if not parallel_enabled:
+                sequential_tasks.append((task_index, query_text, tool_name))
+            else:
+                parallel_tasks.append((task_index, query_text, tool_name))
+
+        # Execute text2sql tasks sequentially (no parallelization)
+        for task_index, query_text, tool_name in sequential_tasks:
+            task_results_map[task_index] = await _execute_single_task(
+                task_index, query_text, tool_name
+            )
+
+        # Execute remaining search tasks in parallel with a concurrency cap
+        if parallel_tasks:
+            semaphore = asyncio.Semaphore(max_concurrency)
+            parallel_results = await asyncio.gather(
+                *[
+                    _execute_with_semaphore(
+                        semaphore, task_index, query_text, tool_name
+                    )
+                    for task_index, query_text, tool_name in parallel_tasks
+                ]
+            )
+            for result in parallel_results:
+                task_results_map[result["index"]] = result
+
+        # Rebuild ordered results list to preserve index-based assumptions downstream
+        if task_results_map:
+            max_index = max(task_results_map.keys())
+            ordered_results = []
+            for i in range(max_index + 1):
+                result = task_results_map.get(i)
+                if result is None:
+                    ordered_results.append(
+                        _build_skipped_result(
+                            i,
+                            "",
+                            "unknown",
+                            "no_search_result",
+                        )
+                    )
+                else:
+                    ordered_results.append(result)
+        else:
+            ordered_results = []
 
         # Log performance
         search_end_time = time.time()
         search_duration = search_end_time - search_start_time
-        print(f"All search tasks completed in {search_duration:.2f} seconds")
-        print(f"Total search tasks completed: {len(task_results)}")
+        logger.info(f"All search tasks completed in {search_duration:.2f} seconds")
+        logger.info(f"Total search tasks completed: {len(ordered_results)}")
 
-        return task_results
+        return ordered_results
 
+    async def _create_initial_research_plan(self, state):
+        """Create initial research plan as todo items"""
+        try:
+            # Get existing pending tasks for duplicate prevention (Loop 1+)
+            existing_pending = []
+            if state.research_loop_count > 0:
+                existing_pending = state.steering_todo.get_pending_tasks()
+                if existing_pending:
+                    self.logger.info(
+                        f"[STEERING] Loop {state.research_loop_count}: "
+                        f"Found {len(existing_pending)} existing pending tasks, "
+                        f"will avoid creating duplicates"
+                    )
+
+            # Generate initial research plan based on the query
+            # Pass existing tasks to LLM for awareness (only in Loop 1+)
+            research_plan = await self.plan_research(
+                state.search_query,
+                state.knowledge_gap,
+                state.research_loop_count,
+                getattr(state, "uploaded_knowledge", None),
+                existing_tasks=existing_pending if existing_pending else None,
+            )
+
+            # Determine source based on research loop count
+            # First loop (0) = original query, subsequent loops = knowledge gaps identified by system
+            is_first_loop = state.research_loop_count == 0
+            task_source = "original_query" if is_first_loop else "knowledge_gap"
+
+            # Convert research plan to todo items
+            if "subtasks" in research_plan:
+
+                for i, subtask in enumerate(research_plan["subtasks"], 1):
+                    if subtask.get("type") == "search":
+                        query = subtask.get("query", "")
+                        if isinstance(query, dict):
+                            query = query.get("query", str(query))
+
+                        # Create todo task for this research item
+                        task_description = f"Research: {query}"
+
+                        # Use LLM-suggested priority if available, otherwise calculate
+                        priority = subtask.get("priority")
+                        if priority is None:
+                            # Fallback: Earlier tasks get higher priority
+                            priority = 5 + (len(research_plan["subtasks"]) - i)
+
+                        state.steering_todo.create_task(
+                            task_description,
+                            priority=priority,
+                            search_queries=[str(query)],
+                            created_from_message="Auto-generated research subtask",
+                            source=task_source,  # original_query for first loop, knowledge_gap for follow-ups
+                        )
+
+            # Create overall research goal task (only if we have a meaningful query)
+            research_query = (
+                state.search_query or state.research_topic or "research objectives"
+            )
+
+            # Skip creating this task if the query is "none" or empty
+            if research_query and research_query.lower().strip() not in [
+                "none",
+                "",
+                "research objectives",
+            ]:
+                high_level_description = f"Complete research on: {research_query}"
+                state.steering_todo.create_task(
+                    high_level_description,
+                    priority=10,  # Highest priority
+                    search_queries=[research_query],
+                    created_from_message="Primary research objective",
+                    source="original_query",
+                )
+
+            self.logger.info(
+                f"[STEERING] Initial research plan created with {len(state.steering_todo.tasks)} tasks"
+            )
+
+        except Exception as e:
+            self.logger.error(f"[STEERING] Error creating initial research plan: {e}")
+
+    async def _update_todo_based_on_results(self, research_plan, search_results, state):
+        """
+        Update todo.md tasks based on research results - similar to how Cursor/Claude
+        mark tasks as completed and adapt their approach based on outcomes.
+        """
+        try:
+            self.logger.info(
+                "[ADAPTIVE_FEEDBACK] Updating todo tasks based on research results"
+            )
+
+            # Analyze search results to determine task completion
+            completed_searches = []
+            failed_searches = []
+
+            for i, result in enumerate(search_results):
+                subtask = (
+                    research_plan.get("subtasks", [])[i]
+                    if i < len(research_plan.get("subtasks", []))
+                    else {}
+                )
+                search_query = subtask.get("query", "")
+
+                if result.get("success", False):
+                    sources_found = len(result.get("sources", []))
+                    completed_searches.append(
+                        {
+                            "query": search_query,
+                            "sources_found": sources_found,
+                            "description": subtask.get("description", ""),
+                        }
+                    )
+                else:
+                    failed_searches.append(
+                        {
+                            "query": search_query,
+                            "error": result.get("error", "Unknown error"),
+                        }
+                    )
+
+            # Create feedback message for the todo system
+            feedback_message = f"""Research loop {state.research_loop_count} completed:
+
+SUCCESSFUL SEARCHES ({len(completed_searches)}):
+"""
+            for search in completed_searches:
+                feedback_message += f"- ✅ '{search['query']}' - Found {search['sources_found']} sources\n"
+
+            if failed_searches:
+                feedback_message += f"\nFAILED SEARCHES ({len(failed_searches)}):\n"
+                for search in failed_searches:
+                    feedback_message += (
+                        f"- ❌ '{search['query']}' - {search['error']}\n"
+                    )
+
+            feedback_message += f"\nCurrent knowledge gaps: {state.knowledge_gap}\n"
+            feedback_message += (
+                f"Sources gathered so far: {len(state.sources_gathered)}\n"
+            )
+
+            # Add this as a system message to update the todo
+            await state.steering_todo.add_user_message(
+                f"SYSTEM_FEEDBACK: {feedback_message}"
+            )
+
+            self.logger.info(
+                f"[ADAPTIVE_FEEDBACK] Updated todo with research results: {len(completed_searches)} successful, {len(failed_searches)} failed"
+            )
+
+        except Exception as e:
+            self.logger.error(
+                f"[ADAPTIVE_FEEDBACK] Error updating todo based on results: {e}"
+            )
+
+    async def _process_pending_steering_messages(self, state):
+        """Process any pending steering messages and update research plan"""
+        try:
+            # Check if there are pending steering messages in the state
+            if (
+                hasattr(state, "pending_steering_messages")
+                and state.pending_steering_messages
+            ):
+                self.logger.info(
+                    f"[STEERING] Processing {len(state.pending_steering_messages)} pending messages"
+                )
+
+                # Process each message
+                for message_data in state.pending_steering_messages:
+                    try:
+                        message_content = message_data.get(
+                            "content", message_data.get("message", "")
+                        )
+                        await state.add_steering_message(message_content)
+                        self.logger.info(
+                            f"[STEERING] Processed message: {message_content}"
+                        )
+                    except Exception as e:
+                        self.logger.error(f"[STEERING] Error processing message: {e}")
+
+                # Clear processed messages
+                state.pending_steering_messages.clear()
+
+                # Update research focus based on steering constraints
+                await self._adapt_research_plan_for_steering(state)
+
+            elif (
+                state.steering_todo and len(state.steering_todo.get_pending_tasks()) > 0
+            ):
+                # Even if no new messages, check if we need to adapt the research plan
+                self.logger.info(
+                    "[STEERING] Checking existing todo tasks for research adaptation"
+                )
+                await self._adapt_research_plan_for_steering(state)
+
+        except Exception as e:
+            self.logger.error(
+                f"[STEERING] Error processing pending steering messages: {e}"
+            )
+
+    async def _adapt_research_plan_for_steering(self, state):
+        """Adapt the research plan based on current steering constraints"""
+        try:
+            if not state.steering_todo:
+                return
+
+            constraints = state.steering_todo.get_current_constraints()
+
+            # If we have focus constraints, update the main search query
+            if constraints.get("focus_on"):
+                focus_items = constraints["focus_on"]
+                # Modify the search query to include focus constraints
+                original_query = state.search_query
+                focused_query = f"{original_query} {' '.join(focus_items)}"
+
+                # Update state query for this research loop
+                state.search_query = focused_query
+                self.logger.info(
+                    f"[STEERING] Adapted query: '{original_query}' → '{focused_query}'"
+                )
+
+            # Mark relevant todo tasks as in-progress
+            pending_tasks = state.steering_todo.get_pending_tasks()
+            for task in pending_tasks[:3]:  # Process top 3 pending tasks
+                if any(
+                    keyword in task.description.lower()
+                    for keyword in ["research", "complete"]
+                ):
+                    from src.simple_steering import TaskStatus
+
+                    state.steering_todo.mark_task_in_progress(task.id)
+                    self.logger.info(f"[STEERING] Started task: {task.description}")
+
+        except Exception as e:
+            self.logger.error(f"[STEERING] Error adapting research plan: {e}")
 
 
 class SearchAgent:
@@ -925,7 +2060,6 @@ class SearchAgent:
             database_info: Database context information for text2sql queries
         """
         self.config = config
-        self.database_info = database_info
         self.logger = logging.getLogger(__name__)
 
     async def general_search(self, query):
@@ -988,123 +2122,6 @@ class SearchAgent:
             tool_name="linkedin_search", params={"query": query, "top_k": 5}
         )
 
-    async def text2sql_search(self, query):
-        """Execute a text2sql query"""
-        # Import the global text2sql tool instance from the database router
-        from routers.database import text2sql_tool
-
-        self.logger.info(f"SearchAgent.text2sql_search called with query: {query}")
-
-        # Get database context from the agent's database_info
-        db_id = None
-        if hasattr(self, "database_info") and self.database_info:
-            # Use the first database from the database_info
-            if isinstance(self.database_info, list) and len(self.database_info) > 0:
-                db_id = self.database_info[0].get("database_id")
-                self.logger.info(f"Using database_id from database_info: {db_id}")
-
-        # Use the global text2sql tool instance that has access to uploaded databases
-        try:
-            result = text2sql_tool._run(query, db_id=db_id)
-
-            self.logger.info(f"text2sql_tool._run returned: {result}")
-
-            # Format the result to match the expected search result format
-            if "error" in result:
-                return {
-                    "index": 0,
-                    "query": query,
-                    "success": False,
-                    "content": f"Error: {result['error']}",
-                    "sources": [],
-                    "error": result["error"],
-                }
-            else:
-                # Format the successful result with HTML for better display
-                content = "<div class='database-results' style='margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;'>\n"
-                content += "<h3 style='color: #2c3e50; margin-top: 0;'>📊 Database Analysis Results</h3>\n"
-                content += (
-                    f"<p style='color: #555;'><strong>Query:</strong> {query}</p>\n"
-                )
-
-                if "sql" in result:
-                    content += "<div style='background-color: #f4f4f4; border: 1px solid #ddd; border-radius: 5px; padding: 15px; margin: 15px 0; font-family: monospace; font-size: 14px; overflow-x: auto;'>\n"
-                    content += "<h4 style='margin-top: 0; color: #555;'>Generated SQL Query:</h4>\n"
-                    content += f"<pre style='margin: 0; white-space: pre-wrap;'><code>{result['sql']}</code></pre>\n"
-                    content += "</div>\n"
-
-                if "results" in result and result["results"]:
-                    results_data = result["results"]
-                    if results_data.get("type") == "select" and results_data.get(
-                        "rows"
-                    ):
-                        content += f"<h4 style='color: #2c3e50; margin-top: 20px;'>📈 Query Results ({results_data.get('row_count', 0)} rows)</h4>\n"
-
-                        # Create HTML table with inline styles
-                        columns = results_data.get("columns", [])
-                        if columns:
-                            content += "<table style='width: 100%; border-collapse: collapse; margin: 20px 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1); background-color: white;'>\n"
-                            content += "<thead><tr>\n"
-                            for col in columns:
-                                content += f"<th style='background-color: #3498db; color: white; padding: 12px; text-align: left; font-weight: bold; border-bottom: 2px solid #2980b9;'>{col}</th>\n"
-                            content += "</tr></thead>\n"
-                            content += "<tbody>\n"
-
-                            # Add data rows
-                            for idx, row in enumerate(results_data.get("rows", [])):
-                                bg_color = "#f8f9fa" if idx % 2 == 0 else "white"
-                                content += (
-                                    f"<tr style='background-color: {bg_color};'>\n"
-                                )
-                                for col in columns:
-                                    value = row.get(col, "")
-                                    # Format numbers nicely
-                                    if isinstance(value, float):
-                                        value = f"{value:.2f}"
-                                    content += f"<td style='padding: 10px; border-bottom: 1px solid #ddd;'>{value}</td>\n"
-                                content += "</tr>\n"
-
-                            content += "</tbody>\n"
-                            content += "</table>\n"
-                    else:
-                        content += f"<p><strong>Results:</strong> {results_data}</p>\n"
-
-                if "database" in result:
-                    content += f"<p style='color: #555; margin-top: 15px;'><strong>📁 Source Database:</strong> {result['database']}</p>\n"
-
-                if "executed_at" in result:
-                    content += f"<p style='color: #888; font-size: 0.9em;'><strong>⏰ Executed at:</strong> {result['executed_at']}</p>\n"
-
-                content += "</div>\n"
-
-                self.logger.info(f"text2sql formatted content: {content[:200]}...")
-
-                return {
-                    "index": 0,
-                    "query": query,
-                    "success": True,
-                    "content": content,
-                    "sources": [
-                        {
-                            "title": f'Database Query Results - {result.get("database", "Unknown Database")}',
-                            "url": f'database://{result.get("database", "unknown")}',
-                            "snippet": f'SQL: {result.get("sql", "N/A")}\nResults: {len(result.get("results", {}).get("rows", []))} rows returned',
-                            "source_type": "database",
-                        }
-                    ],
-                    "error": None,
-                }
-
-        except Exception as e:
-            self.logger.error(f"Error in text2sql_search: {e}")
-            return {
-                "index": 0,
-                "query": query,
-                "success": False,
-                "content": f"Error executing text2sql query: {str(e)}",
-                "sources": [],
-                "error": str(e),
-            }
 
     async def execute(self, subtask, tool_executor=None):
         """

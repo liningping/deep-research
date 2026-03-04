@@ -30,14 +30,74 @@ async def async_multi_agents_network(state: SummaryState, callbacks=None):
     """
     logger = logging.getLogger(__name__)
 
-    logger.info("[async_multi_agents_network] Starting research with agent architecture")
+    logger.info("=" * 70)
+    logger.info("[async_multi_agents_network] Starting research")
+    logger.info(f"[async_multi_agents_network] state type: {type(state)}")
+    logger.info(
+        f"[async_multi_agents_network] state.steering_enabled: {getattr(state, 'steering_enabled', 'MISSING')}"
+    )
+    logger.info(
+        f"[async_multi_agents_network] state.steering_todo: {getattr(state, 'steering_todo', 'MISSING')}"
+    )
+    logger.info(
+        f"[async_multi_agents_network] hasattr steering_enabled: {hasattr(state, 'steering_enabled')}"
+    )
+    logger.info(
+        f"[async_multi_agents_network] hasattr steering_todo: {hasattr(state, 'steering_todo')}"
+    )
+    logger.info("=" * 70)
+
+    logger.info(
+        "[async_multi_agents_network] Starting research with agent architecture"
+    )
     logger.info(f"callbacks at entry: {'present' if callbacks else 'none'}")
     logger.info(
         f"[async_multi_agents_network] Research loop count: {state.research_loop_count}"
     )
 
     try:
+        # Process steering messages and update todo.md at the start of each research loop
+        if hasattr(state, "steering_todo") and state.steering_todo:
+            from src.steering_integration import (
+                integrate_steering_with_research_loop,
+                get_steering_summary_for_agent,
+            )
 
+            logger.info(
+                "[STEERING] Processing steering messages and updating todo.md before research loop"
+            )
+
+            # Process queued steering messages and update todo.md
+            steering_result = await state.prepare_steering_for_next_loop()
+            if steering_result.get("steering_enabled"):
+                logger.info(
+                    f"[STEERING] Todo.md updated to version {steering_result.get('todo_version')}"
+                )
+                logger.info(
+                    f"[STEERING] Pending tasks: {steering_result.get('pending_tasks')}, "
+                    f"Completed tasks: {steering_result.get('completed_tasks')}"
+                )
+
+                # Emit steering update event for UI
+                if callbacks:
+                    await callbacks.emit_event(
+                        "steering_updated",
+                        {
+                            "todo_version": steering_result.get("todo_version"),
+                            "current_plan": steering_result.get("current_plan"),
+                            "pending_tasks": steering_result.get("pending_tasks"),
+                            "completed_tasks": steering_result.get("completed_tasks"),
+                            "loop_guidance": steering_result.get("loop_guidance"),
+                            "research_loop_count": state.research_loop_count,
+                        },
+                    )
+
+            # Get steering summary for agent context
+            steering_context = get_steering_summary_for_agent(state)
+            if steering_context:
+                logger.info(
+                    f"[STEERING] Active constraints: {steering_context.strip()}"
+                )
 
         # Import the master agent
         from src.agent_architecture import MasterResearchAgent
@@ -73,9 +133,18 @@ async def async_multi_agents_network(state: SummaryState, callbacks=None):
 
         # Start heartbeat
         heartbeat = asyncio.create_task(heartbeat_task(callbacks))
-        # Execute research using the master agent
+        # Execute research using the master agent asynchronously
+        # The 'results' from master_agent.execute_research should be a list of dictionaries,
+        # where each dictionary is a search result.
+        # MODIFICATION: master_agent_output is now a dictionary
+        # WORKAROUND: LangGraph is losing the database_info field during state serialization
+        # Use session-specific global variable instead of trying to get from state.config
+        stream_id = None
+        if config and "configurable" in config:
+            stream_id = config["configurable"].get("stream_id")
+        
         master_agent_output = await master_agent.execute_research(
-            state, callbacks=callbacks, database_info=None
+            state, callbacks=callbacks
         )
         # Cancel heartbeat when done
         heartbeat.cancel()
@@ -312,9 +381,27 @@ async def async_multi_agents_network(state: SummaryState, callbacks=None):
                 "research_loop_count", 0
             )
 
-        # Explicitly preserve config from the original state
-        if "config" in current_state_dict:
-            updated_results["config"] = current_state_dict["config"]
+        # Explicitly preserve benchmark fields from the original state, as they are critical for flow
+        benchmark_fields = [
+            "benchmark_mode",
+            "benchmark_result",
+            "previous_answers",
+            "reflection_history",
+            "config",
+        ]
+        for field in benchmark_fields:
+            if field in current_state_dict:  # Prioritize original state for these
+                if updated_results.get(field) != current_state_dict[field]:
+                    logger.info(
+                        f"[async_multi_agents_network] Preserving benchmark field '{field}' from original state."
+                    )
+                updated_results[field] = current_state_dict[field]
+            elif (
+                field not in updated_results
+            ):  # If not in current_state_dict and not set by agent
+                updated_results[field] = (
+                    None  # Or some default like [] for lists, {} for dicts
+                )
 
         # Visualization fields should ideally be part of raw_agent_results if it's a dict,
         # or handled within MasterResearchAgent to be part of its structured output.
@@ -329,6 +416,19 @@ async def async_multi_agents_network(state: SummaryState, callbacks=None):
             logger.info(
                 f"[async_multi_agents_network] Type of first item in final web_research_results: {type(updated_results['web_research_results'][0])}"
             )
+
+        # CRITICAL: Ensure steering fields are preserved
+        if hasattr(state, "steering_enabled"):
+            updated_results["steering_enabled"] = state.steering_enabled
+        if hasattr(state, "steering_todo"):
+            updated_results["steering_todo"] = state.steering_todo
+
+        logger.info(
+            f"[async_multi_agents_network] Preserving steering_enabled: {updated_results.get('steering_enabled', 'MISSING')}"
+        )
+        logger.info(
+            f"[async_multi_agents_network] Preserving steering_todo: {updated_results.get('steering_todo', 'MISSING')}"
+        )
 
         return updated_results
 
