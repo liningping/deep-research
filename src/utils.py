@@ -39,7 +39,7 @@ def log_general_deep_search_params(**params):
     logger.info(f"Tavily search parameters:\n{formatted_params}")
 
     # Print to console as well
-    print(f"\nTavily API Call Parameters:\n{formatted_params}\n")
+    logger.info(f"\nTavily API Call Parameters:\n{formatted_params}\n")
 
     return params
 
@@ -96,7 +96,7 @@ def deduplicate_and_format_sources(
             raw_content = source.get("raw_content", "")
             if raw_content is None:
                 raw_content = ""
-                print(f"Warning: No raw_content found for source {source['url']}")
+                logger.warning(f"Warning: No raw_content found for source {source['url']}")
             if len(raw_content) > char_limit:
                 raw_content = raw_content[:char_limit] + "... [truncated]"
             formatted_text += f"Full source content limited to {max_tokens_per_source} tokens: {raw_content}\n\n"
@@ -178,17 +178,17 @@ def general_deep_search(query, include_raw_content=True, top_k=3, config=None):
 
     # Validate query length - Tavily has a 400 character limit
     if len(query) > 400:
-        print(
+        logger.warning(
             f"WARNING: Query exceeds Tavily's 400 character limit. Query length: {len(query)}"
         )
         # Truncate query to 397 characters + "..."
         query = query[:397] + "..."
-        print(f"Truncated query: {query}")
+        logger.info(f"Truncated query: {query}")
 
     # Validate query isn't empty after stripping whitespace
     query = query.strip()
     if not query:
-        print("ERROR: Empty query after stripping whitespace")
+        logger.error("ERROR: Empty query after stripping whitespace")
         return {"results": [], "search_string": "", "response_time": 0}
 
     tavily_client = TavilyClient(api_key=api_key)
@@ -237,7 +237,7 @@ def general_deep_search(query, include_raw_content=True, top_k=3, config=None):
             # Update the results in the response
             search_results["results"] = deduplicated_results
 
-            print(
+            logger.info(
                 f"Filtered Tavily results: {len(deduplicated_results)} out of {len(search_results.get('results', []))} meet the score threshold of {threshold} and are unique by title/URL."
             )
 
@@ -246,8 +246,8 @@ def general_deep_search(query, include_raw_content=True, top_k=3, config=None):
     except requests.exceptions.HTTPError as e:
         # Handle specific error codes
         if e.response.status_code == 422:
-            print(f"Tavily API validation error (422): {e.response.text}")
-            print("This is likely due to invalid parameters. Returning empty results.")
+            logger.info(f"Tavily API validation error (422): {e.response.text}")
+            logger.info("This is likely due to invalid parameters. Returning empty results.")
             # Return a valid empty response instead of retrying
             return {
                 "results": [],
@@ -256,7 +256,7 @@ def general_deep_search(query, include_raw_content=True, top_k=3, config=None):
                 "response_time": 0,
             }
         elif e.response.status_code == 401:
-            print(f"Tavily API authentication error (401): Check your API key")
+            logger.info(f"Tavily API authentication error (401): Check your API key")
             # Return empty results for auth errors
             return {
                 "results": [],
@@ -265,10 +265,10 @@ def general_deep_search(query, include_raw_content=True, top_k=3, config=None):
                 "response_time": 0,
             }
         else:
-            print(f"Tavily API error: {e}. Retrying...")
+            logger.info(f"Tavily API error: {e}. Retrying...")
             raise  # Re-raise to trigger the retry
     except Exception as e:
-        print(f"Unexpected error in Tavily search: {str(e)}")
+        logger.error(f"Unexpected error in Tavily search: {str(e)}")
         # Return a valid empty response instead of failing
         return {
             "results": [],
@@ -330,17 +330,17 @@ while minimizing hallucinations by:
 
     # Validate query length - Tavily has a 400 character limit
     if len(query) > 400:
-        print(
+        logger.warning(
             f"WARNING: Query exceeds Tavily's 400 character limit. Query length: {len(query)}"
         )
         # Truncate query to 397 characters + "..."
         query = query[:397] + "..."
-        print(f"Truncated query: {query}")
+        logger.info(f"Truncated query: {query}")
 
     # Validate query isn't empty after stripping whitespace
     query = query.strip()
     if not query:
-        print("ERROR: Empty query after stripping whitespace")
+        logger.error("ERROR: Empty query after stripping whitespace")
         return {"results": [], "search_string": "", "response_time": 0}
 
     # Prepare to search specifically on LinkedIn
@@ -398,7 +398,7 @@ while minimizing hallucinations by:
             # Update the results in the response
             search_results["results"] = deduplicated_results
 
-            print(
+            logger.info(
                 f"Filtered LinkedIn results: {len(deduplicated_results)} out of {len(search_results.get('results', []))} meet the score threshold of {min_score} and are unique by title/URL."
             )
 
@@ -407,8 +407,8 @@ while minimizing hallucinations by:
     except requests.exceptions.HTTPError as e:
         # Handle specific error codes
         if e.response.status_code == 422:
-            print(f"Tavily API validation error (422): {e.response.text}")
-            print("This is likely due to invalid parameters. Returning empty results.")
+            logger.info(f"Tavily API validation error (422): {e.response.text}")
+            logger.info("This is likely due to invalid parameters. Returning empty results.")
             # Return a valid empty response instead of retrying
             return {
                 "results": [],
@@ -417,7 +417,7 @@ while minimizing hallucinations by:
                 "response_time": 0,
             }
         elif e.response.status_code == 401:
-            print(f"Tavily API authentication error (401): Check your API key")
+            logger.info(f"Tavily API authentication error (401): Check your API key")
             # Return empty results for auth errors
             return {
                 "results": [],
@@ -426,10 +426,10 @@ while minimizing hallucinations by:
                 "response_time": 0,
             }
         else:
-            print(f"Tavily API error: {e}. Retrying...")
+            logger.info(f"Tavily API error: {e}. Retrying...")
             raise  # Re-raise to trigger the retry
     except Exception as e:
-        print(f"Unexpected error in Tavily search: {str(e)}")
+        logger.error(f"Unexpected error in Tavily search: {str(e)}")
         # Return a valid empty response instead of failing
         return {
             "results": [],
@@ -492,17 +492,17 @@ This function is specifically designed to find GitHub repositories and code by:
 
     # Validate query length - Tavily has a 400 character limit
     if len(query) > 400:
-        print(
+        logger.warning(
             f"WARNING: Query exceeds Tavily's 400 character limit. Query length: {len(query)}"
         )
         # Truncate query to 397 characters + "..."
         query = query[:397] + "..."
-        print(f"Truncated query: {query}")
+        logger.info(f"Truncated query: {query}")
 
     # Validate query isn't empty after stripping whitespace
     query = query.strip()
     if not query:
-        print("ERROR: Empty query after stripping whitespace")
+        logger.error("ERROR: Empty query after stripping whitespace")
         return {"results": [], "search_string": "", "response_time": 0}
 
     # Focus on GitHub domains
@@ -576,7 +576,7 @@ This function is specifically designed to find GitHub repositories and code by:
             # Update the results in the response
             search_results["results"] = deduplicated_results
 
-            print(
+            logger.info(
                 f"Filtered GitHub results: {len(deduplicated_results)} out of {len(search_results.get('results', []))} meet the score threshold of {min_score} and are unique repositories/profiles."
             )
 
@@ -585,8 +585,8 @@ This function is specifically designed to find GitHub repositories and code by:
     except requests.exceptions.HTTPError as e:
         # Handle specific error codes
         if e.response.status_code == 422:
-            print(f"Tavily API validation error (422): {e.response.text}")
-            print("This is likely due to invalid parameters. Returning empty results.")
+            logger.info(f"Tavily API validation error (422): {e.response.text}")
+            logger.info("This is likely due to invalid parameters. Returning empty results.")
             # Return a valid empty response instead of retrying
             return {
                 "results": [],
@@ -595,7 +595,7 @@ This function is specifically designed to find GitHub repositories and code by:
                 "response_time": 0,
             }
         elif e.response.status_code == 401:
-            print(f"Tavily API authentication error (401): Check your API key")
+            logger.info(f"Tavily API authentication error (401): Check your API key")
             # Return empty results for auth errors
             return {
                 "results": [],
@@ -604,10 +604,10 @@ This function is specifically designed to find GitHub repositories and code by:
                 "response_time": 0,
             }
         else:
-            print(f"Tavily API error: {e}. Retrying...")
+            logger.error(f"Tavily API error: {e}. Retrying...")
             raise  # Re-raise to trigger the retry
     except Exception as e:
-        print(f"Unexpected error in Tavily search: {str(e)}")
+        logger.error(f"Unexpected error in Tavily search: {str(e)}")
         # Return a valid empty response instead of failing
         return {
             "results": [],
@@ -668,17 +668,17 @@ def academic_search(
 
     # Validate query length - Tavily has a 400 character limit
     if len(query) > 400:
-        print(
+        logger.warning(
             f"WARNING: Query exceeds Tavily's 400 character limit. Query length: {len(query)}"
         )
         # Truncate query to 397 characters + "..."
         query = query[:397] + "..."
-        print(f"Truncated query: {query}")
+        logger.warning(f"Truncated query: {query}")
 
     # Validate query isn't empty after stripping whitespace
     query = query.strip()
     if not query:
-        print("ERROR: Empty query after stripping whitespace")
+        logger.error("ERROR: Empty query after stripping whitespace")
         return {"results": [], "search_string": "", "response_time": 0}
 
     # Focus on academic domains
@@ -718,7 +718,7 @@ def academic_search(
         ):
             academic_query = f"{academic_query} after:{start_year}"
 
-    print(f"Enhanced academic query: {academic_query}")
+    logger.info(f"Enhanced academic query: {academic_query}")
 
     tavily_client = TavilyClient(api_key=api_key)
     try:
@@ -843,7 +843,7 @@ def academic_search(
             # Update the results in the response (no need to re-sort as we sorted before deduplication)
             search_results["results"] = deduplicated_results[:top_k]
 
-            print(
+            logger.info(
                 f"Filtered Academic results: {len(deduplicated_results)} out of {len(search_results.get('results', []))} meet the score threshold of {min_score} and are unique by title/URL."
             )
 
@@ -852,8 +852,8 @@ def academic_search(
     except requests.exceptions.HTTPError as e:
         # Handle specific error codes
         if e.response.status_code == 422:
-            print(f"Tavily API validation error (422): {e.response.text}")
-            print("This is likely due to invalid parameters. Returning empty results.")
+            logger.info(f"Tavily API validation error (422): {e.response.text}")
+            logger.info("This is likely due to invalid parameters. Returning empty results.")
             # Return a valid empty response instead of retrying
             return {
                 "results": [],
@@ -862,7 +862,7 @@ def academic_search(
                 "response_time": 0,
             }
         elif e.response.status_code == 401:
-            print(f"Tavily API authentication error (401): Check your API key")
+            logger.info(f"Tavily API authentication error (401): Check your API key")
             # Return empty results for auth errors
             return {
                 "results": [],
@@ -871,10 +871,10 @@ def academic_search(
                 "response_time": 0,
             }
         else:
-            print(f"Tavily API error: {e}. Retrying...")
+            logger.error(f"Tavily API error: {e}. Retrying...")
             raise  # Re-raise to trigger the retry
     except Exception as e:
-        print(f"Unexpected error in Tavily search: {str(e)}")
+        logger.error(f"Unexpected error in Tavily search: {str(e)}")
         # Return a valid empty response instead of failing
         return {
             "results": [],
@@ -901,27 +901,27 @@ def compare_search_types(
     Returns:
         dict: Results from each search type with metadata about the differences
     """
-    print(f"Comparing search types for query: '{query}'")
+    logger.info(f"Comparing search types for query: '{query}'")
 
     results = {}
     start_time = datetime.datetime.now()
 
     # Run all specialized searches with the same query
     if with_original:
-        print("\nRunning original general_deep_search...")
+        logger.info("\nRunning original general_deep_search...")
         results["original"] = general_deep_search(
             query, include_raw_content=include_raw_content, config=config
         )
 
-    print("\nRunning linkedin_search...")
+    logger.info("\nRunning linkedin_search...")
     results["linkedin"] = linkedin_search(
         query, include_raw_content=include_raw_content
     )
 
-    print("\nRunning github_search...")
+    logger.info("\nRunning github_search...")
     results["github"] = github_search(query, include_raw_content=include_raw_content)
 
-    print("\nRunning academic_search...")
+    logger.info("\nRunning academic_search...")
     results["academic"] = academic_search(
         query, include_raw_content=include_raw_content
     )
@@ -950,22 +950,22 @@ def compare_search_types(
     }
 
     # Print comparison summary
-    print("\n" + "=" * 80)
-    print("SEARCH COMPARISON SUMMARY")
-    print("=" * 80)
-    print(f"Query: '{query}'")
-    print(f"Total time: {total_time:.2f} seconds")
-    print("\nResults count:")
+    logger.info("\n" + "=" * 80)
+    logger.info("SEARCH COMPARISON SUMMARY")
+    logger.info("=" * 80)
+    logger.info(f"Query: '{query}'")
+    logger.info(f"Total time: {total_time:.2f} seconds")
+    logger.info("\nResults count:")
     for k, v in comparison["results_count"].items():
-        print(f"  - {k}: {v} results")
+        logger.info(f"  - {k}: {v} results")
 
-    print("\nAverage scores:")
+    logger.info("\nAverage scores:")
     for k, v in comparison["avg_scores"].items():
-        print(f"  - {k}: {v:.4f} average score")
+        logger.info(f"  - {k}: {v:.4f} average score")
 
-    print("\nDomains found:")
+    logger.info("\nDomains found:")
     for k, domains in comparison["domains_found"].items():
-        print(
+        logger.info(
             f"  - {k}: {', '.join(domains[:5])}"
             + (f" and {len(domains)-5} more..." if len(domains) > 5 else "")
         )
@@ -1000,7 +1000,7 @@ def extract_domain(url):
 
         return domain
     except Exception as e:
-        print(f"Error extracting domain from URL {url}: {str(e)}")
+        logger.error(f"Error extracting domain from URL {url}: {str(e)}")
         # Fallback to simple extraction
         if "//" in url:
             return url.split("//")[1].split("/")[0]
@@ -1023,7 +1023,7 @@ def generate_numbered_sources(sources_list):
     seen_urls = set()  # Keep track of URLs we have already processed
     next_citation_number = 1  # Start numbering from 1
 
-    print(
+    logger.debug(
         f"DEBUG (generate_numbered_sources): Received {len(sources_list)} sources to process."
     )
 
@@ -1037,7 +1037,7 @@ def generate_numbered_sources(sources_list):
 
                 # --- START FIX: Deduplication by URL ---
                 if url in seen_urls:
-                    # print(f"DEBUG: Skipping duplicate URL: {url}") # Optional: uncomment for verbose logging
+                    # logger.info(f"DEBUG: Skipping duplicate URL: {url}") # Optional: uncomment for verbose logging
                     continue  # Skip this source if we've already processed this URL
                 # --- END FIX ---
 
@@ -1061,15 +1061,15 @@ def generate_numbered_sources(sources_list):
                 # Increment the citation number for the next unique source
                 next_citation_number += 1
             else:
-                print(
+                logger.debug(
                     f"DEBUG (generate_numbered_sources): Skipping malformed source string: {source}"
                 )
         else:
-            print(
+            logger.debug(
                 f"DEBUG (generate_numbered_sources): Skipping empty or malformed source string: {source}"
             )
 
-    print(
+    logger.debug(
         f"DEBUG (generate_numbered_sources): Produced {len(numbered_sources)} unique numbered sources."
     )
     return numbered_sources, source_citations
@@ -1103,7 +1103,7 @@ def tavily_search_proper(
         A list of search result dictionaries, or an empty list if an error occurs.
     """
     if not os.getenv("TAVILY_API_KEY"):
-        print("TAVILY_API_KEY not set. Please set the environment variable.")
+        logger.error("TAVILY_API_KEY not set. Please set the environment variable.")
         return []
 
     client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
@@ -1115,7 +1115,7 @@ def tavily_search_proper(
 
     while retries < 5:
         try:
-            print(
+            logger.debug(
                 f"Attempting Tavily search for: '{query[:100]}...' (Attempt {retries + 1})"
             )
             response = client.search(
@@ -1135,12 +1135,12 @@ def tavily_search_proper(
                 if isinstance(response["results"], list) and all(
                     isinstance(item, dict) for item in response["results"]
                 ):
-                    print(
+                    logger.info(
                         f"Tavily search successful. Got {len(response['results'])} results."
                     )
                     return response["results"]
                 else:
-                    print(
+                    logger.warning(
                         f"Warning: Tavily response['results'] is not a list of dicts: {type(response['results'])}"
                     )
                     return []  # Or handle as appropriate
@@ -1148,14 +1148,14 @@ def tavily_search_proper(
                 isinstance(item, dict) for item in response
             ):
                 # Sometimes Tavily might directly return a list of results
-                print(
+                logger.info(
                     f"Tavily search successful (direct list). Got {len(response)} results."
                 )
                 return response
             else:
-                print(f"Warning: Unexpected Tavily response format: {type(response)}")
+                logger.warning(f"Warning: Unexpected Tavily response format: {type(response)}")
                 # Log the actual response for debugging if it's not too large
-                print(f"Full Tavily response: {str(response)[:500]}...")
+                logger.warning(f"Full Tavily response: {str(response)[:500]}...")
                 return []  # Return empty list for unexpected format
 
         except Exception as e:
@@ -1169,28 +1169,28 @@ def tavily_search_proper(
                 or isinstance(e, httpx.ConnectError)
             ):
                 # These are typically transient network issues or server-side problems
-                print(f"Network/Connection error with Tavily API: {e}. Retrying...")
+                logger.info(f"Network/Connection error with Tavily API: {e}. Retrying...")
             elif (
                 "429" in error_message or "rate_limit_exceeded" in error_message.lower()
             ):
                 # Specific handling for rate limit errors
-                print(f"Tavily API rate limit exceeded: {e}. Retrying after a delay...")
+                logger.info(f"Tavily API rate limit exceeded: {e}. Retrying after a delay...")
                 time.sleep(2 * (retries + 1))  # Exponential backoff might be better
             elif "TAVILY_API_KEY" in error_message:  # Catch API key specific errors
-                print(f"Tavily API key error: {e}. Please check your TAVILY_API_KEY.")
+                logger.error(f"Tavily API key error: {e}. Please check your TAVILY_API_KEY.")
                 return []  # Do not retry if API key is the issue
             else:
-                print(f"Tavily API error: {e}. Retrying...")  # General Tavily API error
+                logger.error(f"Tavily API error: {e}. Retrying...")  # General Tavily API error
 
             retries += 1
             if retries < 5:
-                print(f"Retrying in 2 seconds...")
+                logger.info(f"Retrying in 2 seconds...")
                 time.sleep(2)
             else:
-                print(f"Max retries reached for Tavily API. Error: {e}")
+                logger.error(f"Max retries reached for Tavily API. Error: {e}")
                 return []  # Failed after all retries
 
-    print(
+    logger.error(
         f"Failed to retrieve search results for query: '{query[:100]}...' after 5 retries."
     )
     return []

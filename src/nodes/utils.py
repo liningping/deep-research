@@ -15,7 +15,9 @@ import logging
 
 from src.state import SummaryState
 from src.configuration import Configuration
-
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -70,7 +72,7 @@ def emit_event(callbacks, event_type, data=None, error_message=None):
             callbacks.on_event(event_type, data or {})
     except Exception as e:
         error_msg = error_message or f"Warning: Failed to emit event {event_type}"
-        print(f"{error_msg}: {str(e)}")
+        logger.error(f"{error_msg}: {str(e)}")
 
 
 def get_max_loops(
@@ -90,7 +92,7 @@ def get_max_loops(
     """
     # Minimum effort or QA mode overrides everything - use only 1 loop
     if minimum_effort:
-        print("  - Using minimum effort (1 loop)")
+        logger.info("  - Using minimum effort (1 loop)")
         return 1
 
     env_max_loops = os.environ.get("MAX_WEB_RESEARCH_LOOPS")
@@ -99,11 +101,11 @@ def get_max_loops(
         if env_max_loops
         else int(configurable.max_web_research_loops)
     )
-    print(f"  - Reading MAX_WEB_RESEARCH_LOOPS from environment: {env_max_loops}")
+    logger.info(f"  - Reading MAX_WEB_RESEARCH_LOOPS from environment: {env_max_loops}")
 
     max_loops = base_max_loops
 
-    print(
+    logger.info(
         f"  - Using max_loops={max_loops} (extra_effort={extra_effort}, base={base_max_loops})"
     )
     return max_loops

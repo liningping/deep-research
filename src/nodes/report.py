@@ -63,29 +63,29 @@ def generate_report(state: SummaryState, config: RunnableConfig):
     Returns:
         Updated state with the generated report
     """
-    print(f"[UPLOAD_TRACE] generate_report: Function called")
-    print(f"[UPLOAD_TRACE] generate_report: State type: {type(state)}")
-    print(
+    logger.info(f"[UPLOAD_TRACE] generate_report: Function called")
+    logger.info(f"[UPLOAD_TRACE] generate_report: State type: {type(state)}")
+    logger.info(
         f"[UPLOAD_TRACE] generate_report: State has uploaded_knowledge attr: {hasattr(state, 'uploaded_knowledge')}"
     )
     if hasattr(state, "uploaded_knowledge"):
-        print(
+        logger.info(
             f"[UPLOAD_TRACE] generate_report: State.uploaded_knowledge value: {getattr(state, 'uploaded_knowledge', 'MISSING')}"
         )
 
     # CRITICAL DEBUG: Check steering state at function entry
-    logger.info(f"[generate_report] ===== STEERING DEBUG =====")
-    logger.info(
+    logger.debug(f"[generate_report] ===== STEERING DEBUG =====")
+    logger.debug(
         f"[generate_report] state.steering_enabled: {getattr(state, 'steering_enabled', 'MISSING')}"
     )
-    logger.info(
+    logger.debug(
         f"[generate_report] state.steering_todo: {getattr(state, 'steering_todo', 'MISSING')}"
     )
-    logger.info(f"[generate_report] ===========================")
+    logger.debug(f"[generate_report] ===========================")
 
     # Get the current research loop count
     research_loop_count = getattr(state, "research_loop_count", 0)
-    print(f"--- ENTERING generate_report (Loop {research_loop_count}) ---")
+    logger.info(f"--- ENTERING generate_report (Loop {research_loop_count}) ---")
 
     # Step 1: Check if we have any new web research content
     # Combine ALL raw content strings from the last loop's results
@@ -108,11 +108,11 @@ def generate_report(state: SummaryState, config: RunnableConfig):
     existing_summary = state.running_summary or ""
     knowledge_gap = getattr(state, "knowledge_gap", "")
 
-    print(
+    logger.info(
         f"DEBUG: Length of combined cleaned_web_research: {len(cleaned_web_research)}"
     )
-    print(f"DEBUG: Length of existing_summary: {len(existing_summary)}")
-    print(f"DEBUG: Length of knowledge_gap: {len(knowledge_gap)}")
+    logger.info(f"DEBUG: Length of existing_summary: {len(existing_summary)}")
+    logger.info(f"DEBUG: Length of knowledge_gap: {len(knowledge_gap)}")
 
     # Ensure we have source_citations
     source_citations = getattr(state, "source_citations", {})
@@ -122,7 +122,7 @@ def generate_report(state: SummaryState, config: RunnableConfig):
         and state.web_research_results
     ):
         # Extract sources from web_research_results if source_citations is empty
-        print(
+        logger.info(
             "SOURCE EXTRACTION: No source_citations found, extracting from web_research_results"
         )
         source_citations = {}
@@ -160,7 +160,7 @@ def generate_report(state: SummaryState, config: RunnableConfig):
 
         # Update state.source_citations with the newly extracted sources
         state.source_citations = source_citations
-        print(
+        logger.info(
             f"SOURCE EXTRACTION: Extracted {len(source_citations)} sources from web_research_results"
         )
 
@@ -170,7 +170,7 @@ def generate_report(state: SummaryState, config: RunnableConfig):
         and hasattr(state, "sources_gathered")
         and state.sources_gathered
     ):
-        print(
+        logger.info(
             "SOURCE EXTRACTION: No source_citations found, creating from sources_gathered"
         )
         source_citations = {}
@@ -180,13 +180,13 @@ def generate_report(state: SummaryState, config: RunnableConfig):
                     title, url = source_str.split(" : ", 1)
                     source_citations[str(idx + 1)] = {"title": title, "url": url}
                 except Exception as e:
-                    print(
+                    logger.info(
                         f"SOURCE EXTRACTION: Error parsing source {source_str}: {str(e)}"
                     )
 
         # Update state.source_citations
         state.source_citations = source_citations
-        print(
+        logger.info(
             f"SOURCE EXTRACTION: Created {len(source_citations)} source citations from sources_gathered"
         )
 
@@ -194,39 +194,39 @@ def generate_report(state: SummaryState, config: RunnableConfig):
     external_knowledge_section = ""
 
     # Enhanced logging for uploaded knowledge
-    print(f"[UPLOAD_TRACE] generate_report: Checking for uploaded_knowledge")
-    print(
+    logger.info(f"[UPLOAD_TRACE] generate_report: Checking for uploaded_knowledge")
+    logger.info(
         f"[UPLOAD_TRACE] generate_report: uploaded_knowledge_content = {uploaded_knowledge_content}"
     )
-    print(
+    logger.info(
         f"[UPLOAD_TRACE] generate_report: uploaded_knowledge_content type = {type(uploaded_knowledge_content)}"
     )
 
     if uploaded_knowledge_content:
-        print(f"[UPLOAD_TRACE] generate_report: uploaded_knowledge_content is truthy")
-        print(
+        logger.info(f"[UPLOAD_TRACE] generate_report: uploaded_knowledge_content is truthy")
+        logger.info(
             f"[UPLOAD_TRACE] generate_report: uploaded_knowledge_content.strip() = '{uploaded_knowledge_content.strip()}'"
         )
 
     if uploaded_knowledge_content and uploaded_knowledge_content.strip():
-        print(
+        logger.debug(
             f"DEBUG: Including uploaded_knowledge in generate_report. Length: {len(uploaded_knowledge_content)}"
         )
-        print(f"[UPLOAD_TRACE] generate_report: Creating external_knowledge_section")
+        logger.info(f"[UPLOAD_TRACE] generate_report: Creating external_knowledge_section")
         external_knowledge_section = f"""User-Provided External Knowledge:
 ------------------------------------------------------------
 {uploaded_knowledge_content}
 
 """
-        print(
+        logger.info(
             f"[UPLOAD_TRACE] generate_report: external_knowledge_section created, length: {len(external_knowledge_section)}"
         )
     else:
-        print("DEBUG: No uploaded_knowledge to include in generate_report.")
-        print(f"[UPLOAD_TRACE] generate_report: No external knowledge section created")
+        logger.debug("DEBUG: No uploaded_knowledge to include in generate_report.")
+        logger.info(f"[UPLOAD_TRACE] generate_report: No external knowledge section created")
 
     if source_citations:
-        print(f"Using {len(source_citations)} source citations for summarizer")
+        logger.info(f"Using {len(source_citations)} source citations for summarizer")
 
         # Check if we have database query results
         database_sources = [
@@ -236,11 +236,11 @@ def generate_report(state: SummaryState, config: RunnableConfig):
         ]
         # Database results (from text2sql) are already well-formatted HTML tables
         # They flow through normal report generation just like web search results
-        print(
+        logger.debug(
             f"[DEBUG] Total sources: {len(source_citations)}, Database sources: {len([s for s in source_citations if 'database://' in s])}"
         )
     else:
-        print("WARNING: No source citations found for summarizer. We'll still proceed.")
+        logger.warning("WARNING: No source citations found for summarizer. We'll still proceed.")
 
     # Get configuration
     configurable = Configuration.from_runnable_config(config)
@@ -262,7 +262,7 @@ def generate_report(state: SummaryState, config: RunnableConfig):
     else:
         model = configurable.llm_model or "gemini-2.5-pro"
 
-    print(f"[generate_report] Summarizing with provider={provider}, model={model}")
+    logger.info(f"[generate_report] Summarizing with provider={provider}, model={model}")
     from llm_clients import get_llm_client
 
     llm = get_llm_client(provider, model)
@@ -362,24 +362,24 @@ def reflect_on_report(state: SummaryState, config: RunnableConfig) -> Dict[str, 
     """
     try:
         # CRITICAL DEBUG: Check steering state at function entry
-        logger.info(f"[reflect_on_report] ===== STEERING DEBUG =====")
-        logger.info(
+        logger.debug(f"[reflect_on_report] ===== STEERING DEBUG =====")
+        logger.debug(
             f"[reflect_on_report] state.steering_enabled: {getattr(state, 'steering_enabled', 'MISSING')}"
         )
-        logger.info(
+        logger.debug(
             f"[reflect_on_report] state.steering_todo: {getattr(state, 'steering_todo', 'MISSING')}"
         )
-        logger.info(
+        logger.debug(
             f"[reflect_on_report] state.steering_todo type: {type(getattr(state, 'steering_todo', None))}"
         )
         if hasattr(state, "steering_todo") and state.steering_todo:
-            logger.info(
+            logger.debug(
                 f"[reflect_on_report] steering_todo.tasks count: {len(state.steering_todo.tasks)}"
             )
-            logger.info(
+            logger.debug(
                 f"[reflect_on_report] steering_todo.pending_messages: {len(state.steering_todo.pending_messages)}"
             )
-        logger.info(f"[reflect_on_report] ===========================")
+        logger.debug(f"[reflect_on_report] ===========================")
 
         # IMPORTANT: If we have a database report, skip LLM reflection and mark complete
         # All reports go through normal reflection, including database results
@@ -393,16 +393,16 @@ def reflect_on_report(state: SummaryState, config: RunnableConfig) -> Dict[str, 
             state, "minimum_effort", False
         )  # Get minimum_effort flag
         max_research_loops = get_max_loops(
-            configurable, extra_effort, minimum_effort, state.benchmark_mode
+            configurable, extra_effort, minimum_effort
         )  # Pass minimum_effort and benchmark_mode
         research_topic = state.research_topic
 
-        print(f"\n--- REFLECTION START (Loop {research_loop_count+1}) ---")
-        print(f"  - Current Loop Count: {research_loop_count}")
-        print(
+        logger.info(f"\n--- REFLECTION START (Loop {research_loop_count+1}) ---")
+        logger.info(f"  - Current Loop Count: {research_loop_count}")
+        logger.info(
             f"  - Max Research Loops: {max_research_loops} (extra_effort={extra_effort}, minimum_effort={minimum_effort}, benchmark_mode={state.benchmark_mode})"
         )  # Update log
-        print(f"  - Research Topic: {research_topic}")
+        logger.info(f"  - Research Topic: {research_topic}")
 
         # Increment the research loop counter
         next_research_loop_count = research_loop_count + 1
@@ -434,7 +434,7 @@ def reflect_on_report(state: SummaryState, config: RunnableConfig) -> Dict[str, 
                 )
                 research_complete = True  # Hard stop at max loops
 
-            print(
+            logger.info(
                 f"REFLECTION DECISION: Reached maximum research loops ({max_research_loops}). Pending steering messages: {pending_messages_count}, research_complete={research_complete}"
             )
             return {
@@ -507,7 +507,7 @@ When evaluating completeness, consider:
         pending_tasks_for_reflection = ""
         completed_tasks_context = ""
         steering_messages = ""
-        print(f"[reflect_on_report] state.steering_todo: {state.steering_todo}")
+        logger.info(f"[reflect_on_report] state.steering_todo: {state.steering_todo}")
         if hasattr(state, "steering_todo") and state.steering_todo:
             # Get ONLY pending tasks for LLM to evaluate completion
             pending_tasks_for_reflection = (
@@ -589,8 +589,8 @@ When evaluating completeness, consider:
             ]
         )
 
-        print("  - Raw LLM Reflection Response:")
-        print(f"    {response}")
+        logger.info("  - Raw LLM Reflection Response:")
+        logger.info(f"    {response}")
 
         # Extract content based on the response type
         if hasattr(response, "content"):
@@ -626,8 +626,8 @@ When evaluating completeness, consider:
                     result = json.loads(content)
 
             # Log the reflection result
-            print("  - Parsed LLM Reflection Result:")
-            print(f"    {json.dumps(result, indent=4)}")
+            logger.info("  - Parsed LLM Reflection Result:")
+            logger.info(f"    {json.dumps(result, indent=4)}")
 
             # Extract the key information from the result
             research_complete = result.get("research_complete", False)
@@ -663,13 +663,13 @@ When evaluating completeness, consider:
 
             # If research is complete, ensure search_query is empty
             if research_complete:
-                print(
+                logger.info(
                     "  - LLM determined research is complete. Clearing knowledge gap and search query."
                 )
                 search_query = ""
                 knowledge_gap = ""
             else:
-                print("  - LLM determined research should continue.")
+                logger.info("  - LLM determined research should continue.")
 
             # CRITICAL: Process todo_updates from LLM response
             if hasattr(state, "steering_todo") and state.steering_todo:
@@ -693,14 +693,14 @@ When evaluating completeness, consider:
                     )
 
                     for task_id in mark_completed_list:
-                        logger.info(f"🔍 [DEBUG] Processing task_id: {task_id}")
+                        logger.debug(f"🔍 [DEBUG] Processing task_id: {task_id}")
 
                         if task_id in state.steering_todo.tasks:
-                            logger.info(
+                            logger.debug(
                                 f"🔍 [DEBUG] Task {task_id} found in tasks dict"
                             )
                             task = state.steering_todo.tasks[task_id]
-                            logger.info(f"🔍 [DEBUG] Task status: {task.status}")
+                            logger.debug(f"🔍 [DEBUG] Task status: {task.status}")
 
                             # Only mark as completed if it's NOT already completed
                             if task.status == TaskStatus.COMPLETED:
@@ -912,15 +912,15 @@ When evaluating completeness, consider:
                         search_query = "Continue research to process steering messages"
 
             # Log the reflection decision
-            print(
+            logger.info(
                 f"REFLECTION DECISION: Proceeding to loop {next_research_loop_count}."
             )
-            print(f"  - research_complete set to: {research_complete}")
-            print(f"  - Pending steering messages: {final_pending_messages}")
-            print(f"  - Identified knowledge gap: '{knowledge_gap}'")
-            print(f"  - New search query: '{search_query}'")
-            print(f"  - Research topic: '{preserved_research_topic}'")
-            print("--- REFLECTION END ---")
+            logger.info(f"  - research_complete set to: {research_complete}")
+            logger.info(f"  - Pending steering messages: {final_pending_messages}")
+            logger.info(f"  - Identified knowledge gap: '{knowledge_gap}'")
+            logger.info(f"  - New search query: '{search_query}'")
+            logger.info(f"  - Research topic: '{preserved_research_topic}'")
+            logger.info("--- REFLECTION END ---")
 
             # Log complete reflection execution step (non-invasive, never fails research)
             try:
@@ -981,8 +981,8 @@ When evaluating completeness, consider:
             }
 
         except Exception as e:
-            print(f"REFLECTION ERROR: Failed to parse LLM response: {str(e)}")
-            print(f"  - Raw response: {content}")
+            logger.error(f"REFLECTION ERROR: Failed to parse LLM response: {str(e)}")
+            logger.error(f"  - Raw response: {content}")
 
             # Fallback to basic approach
             current_sources = getattr(state, "sources_gathered", [])
@@ -995,11 +995,11 @@ When evaluating completeness, consider:
                 knowledge_gap = "Need specific examples and case studies"
                 search_query = f"Examples and case studies of {research_topic}"
 
-            print(f"REFLECTION DECISION: Using fallback approach due to parsing error.")
-            print(f"  - Identified knowledge gap: '{knowledge_gap}'")
-            print(f"  - New search query: '{search_query}'")
-            print(f"  - Research topic: '{research_topic}' (preserved from original)")
-            print("--- REFLECTION END (Fallback) ---")
+            logger.info(f"REFLECTION DECISION: Using fallback approach due to parsing error.")
+            logger.info(f"  - Identified knowledge gap: '{knowledge_gap}'")
+            logger.info(f"  - New search query: '{search_query}'")
+            logger.info(f"  - Research topic: '{research_topic}' (preserved from original)")
+            logger.info("--- REFLECTION END (Fallback) ---")
 
             # Return updated state with fallback values
             return {
@@ -1031,13 +1031,13 @@ When evaluating completeness, consider:
             }
 
     except Exception as e:
-        print(f"REFLECTION FATAL ERROR: {str(e)}")
+        logger.error(f"REFLECTION FATAL ERROR: {str(e)}")
         # On error, increment research loop but mark as complete to avoid infinite loops
-        print("  - Marking research as complete to avoid infinite loops.")
-        print("--- REFLECTION END (Fatal Error) ---")
+        logger.error("  - Marking research as complete to avoid infinite loops.")
+        logger.error("--- REFLECTION END (Fatal Error) ---")
         return {
             # Fields calculated/updated by this node
-            "research_loop_count": getattr(state, "research_loop_count", 0) + 1,
+            "research_loop_count": research_loop_count + 1,
             "research_complete": True,
             "knowledge_gap": "",
             "search_query": "",
@@ -1083,7 +1083,7 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
 
     # If running summary is empty, fallback to using raw web results
     if not current_summary.strip() and web_research_results:
-        print(
+        logger.info(
             "FINALIZE_REPORT: Running summary is empty. Using raw web research results."
         )
         using_raw_content = True
@@ -1102,18 +1102,18 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
         input_content_for_finalization = re.sub(
             base64_pattern, "[Image Data Removed]", all_new_raw_content
         )
-        print(
+        logger.info(
             f"FINALIZE_REPORT: Using combined raw content of length {len(input_content_for_finalization)}"
         )
     else:
-        print(
+        logger.info(
             f"FINALIZE_REPORT: Using existing running summary of length {len(current_summary)}"
         )
         input_content_for_finalization = current_summary
 
     # If even raw content is empty, we might have an issue, but proceed anyway
     if not input_content_for_finalization.strip():
-        print(
+        logger.warning(
             "FINALIZE_REPORT WARNING: Both running summary and raw results are empty!"
         )
         # Assign an empty string or some placeholder if necessary
@@ -1127,7 +1127,7 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
         and state.web_research_results
     ):
         # Extract sources from web_research_results if source_citations is empty
-        print(
+        logger.info(
             "SOURCE EXTRACTION: No source_citations found, extracting from web_research_results"
         )
         source_citations = {}
@@ -1165,7 +1165,7 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
 
         # Update state.source_citations with the newly extracted sources
         state.source_citations = source_citations
-        print(
+        logger.info(
             f"SOURCE EXTRACTION: Extracted {len(source_citations)} sources from web_research_results"
         )
 
@@ -1175,7 +1175,7 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
         and hasattr(state, "sources_gathered")
         and state.sources_gathered
     ):
-        print(
+        logger.info(
             "SOURCE EXTRACTION: No source_citations found, creating from sources_gathered"
         )
         source_citations = {}
@@ -1185,13 +1185,13 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
                     title, url = source_str.split(" : ", 1)
                     source_citations[str(idx + 1)] = {"title": title, "url": url}
                 except Exception as e:
-                    print(
+                    logger.info(
                         f"SOURCE EXTRACTION: Error parsing source {source_str}: {str(e)}"
                     )
 
         # Update state.source_citations
         state.source_citations = source_citations
-        print(
+        logger.info(
             f"SOURCE EXTRACTION: Created {len(source_citations)} source citations from sources_gathered"
         )
 
@@ -1203,7 +1203,7 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
             for num, src in sorted(source_citations.items())
         ]
         formatted_sources_for_prompt = "\n".join(numbered_sources)
-        print(f"USING {len(numbered_sources)} UNIQUE NUMBERED SOURCES IN FINAL REPORT")
+        logger.info(f"USING {len(numbered_sources)} UNIQUE NUMBERED SOURCES IN FINAL REPORT")
 
         # Also log sources that were gathered but not included in citations
         cited_urls = set(src["url"] for src in source_citations.values())
@@ -1219,17 +1219,17 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
                     unused_sources.append(source_text)
                     seen_unused_urls.add(url)
         if unused_sources:
-            print(
+            logger.info(
                 f"NOTE: {len(unused_sources)} unique sources were gathered but not cited in the final report"
             )
 
     else:
         # Fallback to simple formatting if no citations were tracked
-        print(
+        logger.warning(
             "WARNING: No source citations found, using basic source list from sources_gathered."
         )
         all_sources_raw = state.sources_gathered
-        print(
+        logger.debug(
             f"DEBUG: Fallback - processing {len(all_sources_raw)} raw gathered sources."
         )
 
@@ -1244,14 +1244,14 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
                         deduplicated_sources.append(source)  # Keep original format
                         seen_urls_fallback.add(url)
                 except Exception:
-                    print(f"DEBUG: Fallback - could not parse source for URL: {source}")
+                    logger.debug(f"DEBUG: Fallback - could not parse source for URL: {source}")
                     deduplicated_sources.append(source)  # Keep unparsable ones?
             elif source:  # Keep non-empty, non-parsable sources
                 deduplicated_sources.append(source)
         # --- END FIX ---
 
         formatted_sources_for_prompt = "\n".join(deduplicated_sources)
-        print(
+        logger.debug(
             f"DEBUG: Fallback - using {len(deduplicated_sources)} deduplicated sources for prompt."
         )
 
@@ -1278,7 +1278,7 @@ def finalize_report(state: SummaryState, config: RunnableConfig):
 
     logger.info(f"[finalize_report] Using provider: {provider}, model: {model}")
     llm = get_llm_client(provider, model)
-    print(
+    logger.info(
         f"Using cloud LLM provider: {provider} with model: {model} for finalizing summary"
     )
 
@@ -1566,7 +1566,7 @@ The report should feel like it was written specifically to answer the user's evo
     # Try to get base64_encoded_images directly from state
     base64_images = getattr(state, "base64_encoded_images", [])
     if base64_images:
-        print(
+        logger.info(
             f"🖼️ Found {len(base64_images)} base64-encoded images directly from state for final report"
         )
     else:
@@ -1574,7 +1574,7 @@ The report should feel like it was written specifically to answer the user's evo
         result_combiner = getattr(state, "result_combiner", None)
         if result_combiner and hasattr(result_combiner, "_base64_encoded_images"):
             base64_images = result_combiner._base64_encoded_images
-            print(
+            logger.info(
                 f"🖼️ Found {len(base64_images)} base64-encoded images from ResultCombiner instance (fallback)"
             )
     # --- END FIX ---
@@ -1670,7 +1670,7 @@ The report should feel like it was written specifically to answer the user's evo
                     }
                 )
         except Exception as e:
-            print(f"Error processing base64 image: {e}")
+            logger.info(f"Error processing base64 image: {e}")
 
     # Process images from the visualizations object (preferred way)
     seen_filenames = set()
@@ -1691,7 +1691,7 @@ The report should feel like it was written specifically to answer the user's evo
                     filepath = os.path.join("visualizations", viz["filename"])
 
                 if not filepath or not os.path.exists(filepath):
-                    print(f"Warning: Visualization file not found: {filepath}")
+                    logger.info(f"Warning: Visualization file not found: {filepath}")
                     continue
 
                 # Get title from metadata or fallback to filename
@@ -1731,7 +1731,7 @@ The report should feel like it was written specifically to answer the user's evo
                     }
                 )
             except Exception as e:
-                print(f"Error processing visualization: {e}")
+                logger.info(f"Error processing visualization: {e}")
 
     # Fallback to visualization_paths if no visualizations were processed
     if not any(
@@ -1759,9 +1759,9 @@ The report should feel like it was written specifically to answer the user's evo
                     f"Image {len(visualization_info) + 1}: {title}"
                 )
             except Exception as e:
-                print(f"Error processing visualization path {path}: {e}")
+                logger.info(f"Error processing visualization path {path}: {e}")
 
-    print(f"Total visualizations prepared for embedding: {len(all_visualizations)}")
+    logger.info(f"Total visualizations prepared for embedding: {len(all_visualizations)}")
 
     # Look for LLM-provided placement markers [INSERT IMAGE X] and replace them with visualizations
     placed_visualization_ids = set()
@@ -1774,18 +1774,18 @@ The report should feel like it was written specifically to answer the user's evo
             # Replace the marker with the visualization HTML
             finalized_summary = finalized_summary.replace(marker, viz["html"])
             placed_visualization_ids.add(viz_id)
-            print(f"✅ Placed visualization {viz_id} at LLM-specified location")
+            logger.info(f"✅ Placed visualization {viz_id} at LLM-specified location")
 
     # MODIFIED: Only place visualizations via explicit markers to prevent duplicates
     # Visualizations not placed via markers will be handled by the activity events system
     # and don't need to be added to the report content directly
     if not placed_visualization_ids:
-        print(
+        logger.info(
             f"⚠️ No visualizations were placed via markers. They will be shown through the activity events system instead."
         )
     elif len(placed_visualization_ids) < len(all_visualizations):
         unplaced_count = len(all_visualizations) - len(placed_visualization_ids)
-        print(
+        logger.info(
             f"ℹ️ {unplaced_count} visualizations were not placed via markers and will be shown through the activity events system instead."
         )
 
@@ -1795,7 +1795,7 @@ The report should feel like it was written specifically to answer the user's evo
     original_markers = re.findall(marker_pattern, finalized_summary)
     if original_markers:
         finalized_summary = re.sub(marker_pattern, "", finalized_summary)
-        print(
+        logger.info(
             f"🧹 Cleaned up {len(original_markers)} unreplaced image markers: {original_markers}"
         )
 
@@ -1810,7 +1810,7 @@ The report should feel like it was written specifically to answer the user's evo
 
     # Generate clean markdown version of the report
     markdown_report = generate_markdown_report(markdown_final_summary)
-    print(f"Generated markdown report with length: {len(markdown_report)}")
+    logger.info(f"Generated markdown report with length: {len(markdown_report)}")
     # Ensure correct indentation for the return statement
     return {
         "running_summary": finalized_summary,
@@ -2075,7 +2075,7 @@ def post_process_report(report, source_citations):
 
     # Create the references section if needed
     if not has_references_section:
-        print("Adding missing References section to the report")
+        logger.info("Adding missing References section to the report")
         # Format the references section
         references_section = "\n\n──────────────────────────────\nReferences\n\n"
 
@@ -2105,7 +2105,7 @@ def post_process_report(report, source_citations):
     matches = list(set(all_matches))  # Remove duplicates
 
     if matches:
-        print(f"Fixing {len(matches)} generic citations in report")
+        logger.info(f"Fixing {len(matches)} generic citations in report")
         for citation_num in matches:
             if citation_num in source_citations:
                 src = source_citations[citation_num]
@@ -2140,14 +2140,14 @@ def post_process_report(report, source_citations):
     source_citations_keys = set(str(k) for k in source_citations.keys())
     missing_citations = [c for c in found_citations if c not in source_citations_keys]
     if missing_citations:
-        print(
+        logger.warning(
             f"WARNING: Report contains citations {missing_citations} not found in source_citations"
         )
 
     # Check which citations from source_citations were not used
     unused_citations = [c for c in source_citations_keys if c not in found_citations]
     if unused_citations:
-        print(
+        logger.warning(
             f"WARNING: Report doesn't use citations {unused_citations} from source_citations"
         )
 
@@ -2160,13 +2160,13 @@ def route_after_search(
 
     # Check if the search_results_empty flag is set
     if getattr(state, "search_results_empty", False):
-        print(
+        logger.info(
             "ROUTING: Search returned no results, skipping summarization and going directly to reflection"
         )
         return "reflect_on_report"
 
     # Normal flow - proceed to summarization
-    print("ROUTING: Search returned results, proceeding to summarization")
+    logger.info("ROUTING: Search returned results, proceeding to summarization")
     return "generate_report"
 
 
@@ -2181,7 +2181,7 @@ def route_after_multi_agents(
     minimum_effort = getattr(state, "minimum_effort", False)
     if minimum_effort:
         # If minimum effort is requested, skip reflection and go directly to finalize
-        print(
+        logger.info(
             "ROUTING: Minimum effort requested, skipping reflection, finalizing report"
         )
         return "finalize_report"
@@ -2196,15 +2196,15 @@ def route_research(state: SummaryState, config: RunnableConfig):
     configurable = Configuration.from_runnable_config(config)
 
     # Debug logging
-    print(f"ROUTING STATE EXAMINATION:")
-    print(f"  - research_complete: {state.research_complete}")
-    print(
+    logger.info(f"ROUTING STATE EXAMINATION:")
+    logger.info(f"  - research_complete: {state.research_complete}")
+    logger.info(
         f"  - search_query: '{state.search_query if hasattr(state, 'search_query') else ''}'"
     )
-    print(
+    logger.info(
         f"  - research_loop_count: {state.research_loop_count}/{getattr(configurable, 'max_web_research_loops', 'N/A')}"
     )
-    print(
+    logger.info(
         f"  - running_summary length: {len(state.running_summary) if state.running_summary else 0} chars"
     )
 
@@ -2216,17 +2216,17 @@ def route_research(state: SummaryState, config: RunnableConfig):
     # Get max_loops using the utility function
     max_loops = get_max_loops(configurable, extra_effort, minimum_effort)
     if state.research_loop_count >= max_loops:
-        print(f"ROUTING OVERRIDE: Max loops reached ({max_loops}), finalizing report")
+        logger.info(f"ROUTING OVERRIDE: Max loops reached ({max_loops}), finalizing report")
         return "finalize_report"
 
     # BUGFIX: Check LLM's decision about research completeness first
     if state.research_complete:
-        print("ROUTING DECISION: Research marked as complete by LLM, finalizing report")
+        logger.info("ROUTING DECISION: Research marked as complete by LLM, finalizing report")
         return "finalize_report"
 
     # First iteration: always continue research
     if state.research_loop_count == 1:
-        print(
+        logger.info(
             "ROUTING OVERRIDE: First iteration - forcing research to continue regardless of flags"
         )
         return "multi_agents_network"
@@ -2237,11 +2237,11 @@ def route_research(state: SummaryState, config: RunnableConfig):
         or not state.search_query
         or len(state.search_query.strip()) == 0
     ):
-        print("ROUTING DECISION: No follow-up query generated, finalizing report")
+        logger.info("ROUTING DECISION: No follow-up query generated, finalizing report")
         return "finalize_report"
 
     # Otherwise, continue with research
-    print(
+    logger.info(
         "ROUTING DECISION: Continuing with research, going to multi-agent network with reflection's query"
     )
     return "multi_agents_network"

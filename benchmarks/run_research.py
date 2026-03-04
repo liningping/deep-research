@@ -6,7 +6,6 @@ This script bypasses the UI and directly calls the backend to get a markdown rep
 Usage:
     python run_research.py "Your research query here"
     python run_research.py "Climate change" --extra-effort --provider openai --model gpt-4o
-    python run_research.py "Who is the current CEO of Tesla?" --qa-mode
     python run_research.py "AI research" --enable-steering --steering-message "Focus on practical applications"
 """
 
@@ -39,8 +38,7 @@ async def run_research_sync(
     visualization_disabled: bool = True,
     extra_effort: bool = False,
     minimum_effort: bool = False,
-    qa_mode: bool = False,
-    benchmark_mode: bool = False,
+
     provider: str = None,
     model: str = None,
     output_file: str = None,
@@ -57,8 +55,6 @@ async def run_research_sync(
         visualization_disabled: Whether to disable visualizations (default: True)
         extra_effort: Whether to use extra effort mode (default: False)
         minimum_effort: Whether to use minimum effort mode (default: False)
-        qa_mode: Whether to run in QA mode (simple question-answering) (default: False)
-        benchmark_mode: Whether to run in benchmark mode (QA with full citations) (default: False)
         provider: LLM provider ('openai', 'anthropic', 'groq', 'google')
         model: LLM model name
         output_file: Optional file path to save the result
@@ -78,8 +74,6 @@ async def run_research_sync(
     print(f"🔄 Max search loops: {max_web_search_loops}")
     print(f"⚡ Extra effort: {extra_effort}")
     print(f"🏃 Minimum effort: {minimum_effort}")
-    print(f"❓ QA mode: {qa_mode}")
-    print(f"🧪 Benchmark mode: {benchmark_mode}")
     print(f"🎯 Steering enabled: {steering_enabled}")
     if steering_enabled and steering_messages:
         print(f"📝 Steering messages: {len(steering_messages)}")
@@ -244,8 +238,7 @@ async def run_research_sync(
             subtopics_metadata=[],
             extra_effort=extra_effort,
             minimum_effort=minimum_effort,
-            qa_mode=qa_mode,
-            benchmark_mode=benchmark_mode,
+
             visualization_disabled=visualization_disabled,
             llm_provider=provider,
             llm_model=model,
@@ -297,52 +290,22 @@ async def run_research_sync(
         # Extract the result based on mode
         final_summary = result.get("running_summary", "No summary generated")
 
-        # Handle different modes appropriately
-        if qa_mode or benchmark_mode:
-            # For QA and benchmark modes, use the benchmark_result if available
-            benchmark_result = result.get("benchmark_result", {})
-            if benchmark_result:
-                # Use the full_response (which includes citations for benchmark mode)
-                final_content = benchmark_result.get("full_response", "")
-                if not final_content:
-                    # Fallback to structured answer if full_response is not available
-                    answer = benchmark_result.get("answer", "")
-                    confidence = benchmark_result.get("confidence_level", "")
-                    evidence = benchmark_result.get("evidence", "")
-                    limitations = benchmark_result.get("limitations", "")
-
-                    final_content = f"**Answer:** {answer}\n\n"
-                    if confidence:
-                        final_content += f"**Confidence:** {confidence}\n\n"
-                    if evidence:
-                        final_content += f"**Supporting Evidence:** {evidence}\n\n"
-                    if limitations:
-                        final_content += f"**Limitations:** {limitations}\n\n"
-
-                mode_name = "benchmark mode" if benchmark_mode else "QA mode"
+        # Prioritize markdown_report if available
+        markdown_report = result.get("markdown_report", "")
+        if markdown_report and markdown_report.strip():
+            # Find the start of Executive Summary section
+            exec_summary_start = markdown_report.find("## Executive Summary\n")
+            if exec_summary_start >= 0:
+                final_content = markdown_report[exec_summary_start:]
+                print("📝 Using clean markdown report (from Executive Summary)")
+            else:
+                final_content = markdown_report
                 print(
-                    f"📝 Using {mode_name} result with {'citations' if benchmark_mode else 'basic sources'}"
+                    "📝 Using complete markdown report (no Executive Summary found)"
                 )
-            else:
-                final_content = final_summary
-                print("📝 No benchmark result available, using running summary")
         else:
-            # Regular mode - prioritize markdown_report if available
-            markdown_report = result.get("markdown_report", "")
-            if markdown_report and markdown_report.strip():
-                # Find the start of Executive Summary section
-                exec_summary_start = markdown_report.find("## Executive Summary\n")
-                if exec_summary_start >= 0:
-                    final_content = markdown_report[exec_summary_start:]
-                    print("📝 Using clean markdown report (from Executive Summary)")
-                else:
-                    final_content = markdown_report
-                    print(
-                        "📝 Using complete markdown report (no Executive Summary found)"
-                    )
-            else:
-                final_content = final_summary
-                print("📝 Using running summary (no markdown report available)")
+            final_content = final_summary
+            print("📝 Using running summary (no markdown report available)")
 
         # Calculate total execution time
         end_time = datetime.now()
@@ -358,27 +321,7 @@ async def run_research_sync(
             "research_complete": result.get("research_complete", False),
         }
 
-        # Add benchmark-specific debug info
-        if qa_mode or benchmark_mode:
-            benchmark_result = result.get("benchmark_result", {})
-            debug_info.update(
-                {
-                    "benchmark_result_available": bool(benchmark_result),
-                    "benchmark_confidence": (
-                        benchmark_result.get("confidence", 0) if benchmark_result else 0
-                    ),
-                    "benchmark_answer_length": (
-                        len(benchmark_result.get("answer", ""))
-                        if benchmark_result
-                        else 0
-                    ),
-                    "citations_processed": (
-                        bool(benchmark_result.get("full_response", "").find("[") != -1)
-                        if benchmark_result
-                        else False
-                    ),
-                }
-            )
+
 
         # Create comprehensive result data
         data_point = {
@@ -402,39 +345,22 @@ async def run_research_sync(
                 "visualization_disabled": visualization_disabled,
                 "extra_effort": extra_effort,
                 "minimum_effort": minimum_effort,
-                "qa_mode": qa_mode,
-                "benchmark_mode": benchmark_mode,
             },
             "debug_info": debug_info,
             "content_stats": {
                 "final_content_length": len(final_content),
                 "final_summary_length": len(final_summary),
-                "markdown_report_available": (
-                    bool(
+                "markdown_report_available": bool(
+                    result.get("markdown_report", "")
+                    and result.get("markdown_report", "").strip()
+                ),
+                "content_type": (
+                    "markdown_report"
+                    if (
                         result.get("markdown_report", "")
                         and result.get("markdown_report", "").strip()
                     )
-                    if not (qa_mode or benchmark_mode)
-                    else False
-                ),
-                "benchmark_result_available": (
-                    bool(result.get("benchmark_result", {}))
-                    if (qa_mode or benchmark_mode)
-                    else False
-                ),
-                "content_type": (
-                    "benchmark_result"
-                    if (qa_mode or benchmark_mode)
-                    and result.get("benchmark_result", {})
-                    else (
-                        "markdown_report"
-                        if (
-                            result.get("markdown_report", "")
-                            and result.get("markdown_report", "").strip()
-                            and not (qa_mode or benchmark_mode)
-                        )
-                        else "running_summary"
-                    )
+                    else "running_summary"
                 ),
             },
         }
@@ -505,8 +431,6 @@ async def main():
 Examples:
   python run_research.py "Climate change solutions" --max-loops 15 --extra-effort
   python run_research.py "Space exploration" --minimum-effort --model gpt-4o
-  python run_research.py "Who is the current president of France?" --qa-mode
-  python run_research.py "What is quantum entanglement?" --benchmark-mode --provider anthropic
   python run_research.py "AI research" --enable-steering --steering-message "Focus on ethics" --steering-message "Include recent papers"
         """,
     )
@@ -536,16 +460,7 @@ Examples:
         action="store_true",
         help="Use minimum effort mode for faster research",
     )
-    parser.add_argument(
-        "--qa-mode",
-        action="store_true",
-        help="Run in QA mode (simple question-answering without full citations)",
-    )
-    parser.add_argument(
-        "--benchmark-mode",
-        action="store_true",
-        help="Run in benchmark mode (QA with full citation processing)",
-    )
+
 
     # LLM configuration
     parser.add_argument(
@@ -588,13 +503,6 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate mutually exclusive modes
-    if args.qa_mode and args.benchmark_mode:
-        print("❌ ERROR: --qa-mode and --benchmark-mode are mutually exclusive.")
-        print(
-            "   Use --qa-mode for simple Q&A or --benchmark-mode for Q&A with full citations."
-        )
-        return 1
 
     # Check for required environment variables
     required_vars = []
@@ -629,8 +537,7 @@ Examples:
             visualization_disabled=args.disable_visualizations,
             extra_effort=args.extra_effort,
             minimum_effort=args.minimum_effort,
-            qa_mode=args.qa_mode,
-            benchmark_mode=args.benchmark_mode,
+
             provider=args.provider,
             model=args.model,
             output_file=args.output,
