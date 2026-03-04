@@ -1281,3 +1281,214 @@ def extract_author_and_year_from_content(
                 break
 
     return first_author, year
+
+def clean_raw_web_content(web_research_results: List[Any]) -> str:
+    """
+    清理并合并来自网络搜索结果的原始内容。
+    
+    功能：
+    1. 提取结果字典中的 'content' 字段。
+    2. 使用分隔符拼接内容。
+    3. 移除 Base64 图片数据（`data:image/...`），以节省 Token 并保持日志整洁。
+    
+    Args:
+        web_research_results: 包含搜索结果的列表（通常是字典列表，但也容错处理字符串）。
+        
+    Returns:
+        str: 清理后的合并文本内容。
+    """
+    if not web_research_results:
+        return ""
+
+    content_parts = []
+    
+    for item in web_research_results:
+        # 处理字典格式（标准的搜索结果）
+        if isinstance(item, dict):
+            content = item.get("content", "")
+            if content:
+                content_parts.append(str(content))
+        # 处理字符串格式（容错或原始文本）
+        elif isinstance(item, str) and item.strip():
+            content_parts.append(item)
+            
+    if not content_parts:
+        return ""
+
+    # 使用明显的分隔符拼接，帮助 LLM 区分不同来源
+    combined_content = "\n\n---\n\n".join(content_parts)
+
+    # 正则表达式：识别并移除 Base64 图片字符串
+    # 匹配模式如: data:image/png;base64,iVBORw0KGgo...
+    base64_pattern = r"data:image/[a-zA-Z]+;base64,[a-zA-Z0-9+/=]+"
+    
+    # 替换为占位符
+    cleaned_content = re.sub(
+        base64_pattern, 
+        "[Image Data Removed]", 
+        combined_content
+    )
+
+    return cleaned_content
+
+def extract_citations_from_state(state: Any) -> Dict[str, Dict[str, str]]:
+    """
+    从 Agent 状态中统一提取并标准化引用来源。
+    
+    策略 (优先级从高到低):
+    1. 如果 `source_citations` 已存在且非空，直接返回（避免覆盖已有进度）。
+    2. 尝试从结构化的 `web_research_results` 中提取 `sources` 字段。
+    3. (回退) 如果仍为空，尝试解析非结构化的 `sources_gathered` 字符串列表 ("Title : URL")。
+    
+    Args:
+        state: SummaryState 对象或具备相应属性的对象。
+        
+    Returns:
+        Dict: 引用字典，Key 为序号字符串 ("1", "2"...)，Value 为 {"title": "...", "url": "..."}。
+    """
+    # 1. 初始化或获取现有引用
+    # 使用 getattr 确保安全性，防止状态结构缺失
+    source_citations = getattr(state, "source_citations", {}) or {}
+    
+    # 动态计算下一个可用的引用序号
+    # (如果是新引用字典为空，则 index 为 1，否则为当前最大数值 + 1)
+    if source_citations:
+        # 获取现有的所有序号（忽略无法转为整数的键）
+        existing_indices = []
+        for k in source_citations.keys():
+            if k.isdigit():
+                existing_indices.append(int(k))
+        citation_index = max(existing_indices) + 1 if existing_indices else 1
+    else:
+        citation_index = 1
+
+    logger.info(f"Extracting citations: starting at index {citation_index} (currently have {len(source_citations)})...")
+    
+    # 2. 从结构化的搜索结果中提取
+    web_results = getattr(state, "web_research_results", []) or []
+    
+    if web_results:
+        for result in web_results:
+            # 检查结果是否包含结构化的 'sources' 列表
+            if isinstance(result, dict) and "sources" in result:
+                result_sources = result.get("sources", [])
+                
+                for source in result_sources:
+                    if isinstance(source, dict) and "url" in source:
+                        url = source["url"]
+                        title = source.get("title", "Unknown Title")
+                        
+                        # 简单的去重检查：避免添加已存在的 URL
+                        is_duplicate = False
+                        for existing in source_citations.values():
+                            if existing.get("url") == url:
+                                is_duplicate = True
+                                break
+                        
+                        if not is_duplicate:
+                            citation_key = str(citation_index)
+                            citation_entry = {"title": title, "url": url}
+                            
+                            # 保留额外的元数据（如 source_type）
+                            if "source_type" in source:
+                                citation_entry["source_type"] = source["source_type"]
+                                
+                            source_citations[citation_key] = citation_entry
+                            citation_index += 1
+
+    # 3. 回退策略：从 sources_gathered 提取
+    logger.info("Extracting citations: checking sources_gathered for any unused sources...")
+    sources_gathered = getattr(state, "sources_gathered", []) or []
+        
+    for source_str in sources_gathered:
+        # 解析格式为 "Title : URL" 的字符串
+        if isinstance(source_str, str) and " : " in source_str:
+            try:
+                # 仅在第一个 ' : ' 处分割，防止标题中包含冒号导致错误
+                title, url = source_str.split(" : ", 1)
+                title = title.strip()
+                url = url.strip()
+                
+                # 再次去重检查
+                if any(c.get("url") == url for c in source_citations.values()):
+                    continue
+
+                citation_key = str(citation_index)
+                source_citations[citation_key] = {"title": title, "url": url}
+                citation_index += 1
+                
+            except ValueError:
+                # 跳过格式错误的字符串
+                continue
+
+    logger.info(f"Extraction complete. Found {len(source_citations)} citations.")
+    return source_citations
+
+def clean_json_response(response_content: Any) -> Dict[str, Any]:
+    """
+    从 LLM 的响应中稳健地提取并解析 JSON 对象。
+    
+    支持的格式：
+    1. 纯 JSON 字符串
+    2. Markdown 代码块 (```json ... ```)
+    3. XML 标签 (<answer>...</answer>)
+    4. 混杂在自然语言中的 JSON ({...})
+    
+    Args:
+        response_content: LLM 返回的内容（通常是字符串，也容错处理对象）。
+        
+    Returns:
+        Dict: 解析后的字典。如果解析失败，返回空字典 {}。
+    """
+    # 0. 类型检查与预处理
+    if not isinstance(response_content, str):
+        # 如果已经是字典，直接返回
+        if isinstance(response_content, dict):
+            return response_content
+        # 如果是 LangChain 的 AIMessage 等对象，尝试获取 content
+        if hasattr(response_content, 'content'):
+            response_content = response_content.content
+        else:
+            response_content = str(response_content)
+
+    text = response_content.strip()
+
+    # 1. 尝试直接解析（最快路径）
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. 策略 A: 提取 <answer> 标签 (常见于特定 Prompt 工程或 DeepSeek 模型)
+    xml_match = re.search(r"<answer>\s*(.*?)\s*</answer>", text, re.DOTALL)
+    if xml_match:
+        try:
+            return json.loads(xml_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. 策略 B: 提取 Markdown 代码块 (```json ... ```)
+    # 兼容 ```json, ```JSON 或 只有 ```
+    code_block_match = re.search(r"```(?:json|JSON)?\s*(.*?)\s*```", text, re.DOTALL)
+    if code_block_match:
+        try:
+            return json.loads(code_block_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 4. 策略 C: 暴力查找最外层的大括号
+    # 处理如 "Here is the JSON: { "key": "value" } Hope this helps." 的情况
+    start_idx = text.find('{')
+    end_idx = text.rfind('}')
+
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        potential_json = text[start_idx : end_idx + 1]
+        try:
+            return json.loads(potential_json)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON brute-force parsing failed: {e}")
+            # 可以在这里尝试更激进的修复，例如使用第三方库 json_repair，但通常原生 json 够用了
+
+    # 5. 失败回退
+    logger.error(f"Failed to extract JSON from response. Preview: {text[:200]}...")
+    return {}

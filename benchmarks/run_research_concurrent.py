@@ -38,8 +38,6 @@ env_file_path = deep_research_dir / ".env"
 logger.info(f"Loading environment from: {env_file_path}")
 load_dotenv(dotenv_path=env_file_path)
 
-# Import HTML-to-markdown converter
-from src.graph import generate_markdown_report
 
 STATS_LOCK = threading.Lock()
 GLOBAL_STATS = {
@@ -102,7 +100,7 @@ class ResearchTrajectoryRecorder:
                 summary = str(summary)
 
             # Convert HTML to clean markdown using the existing graph.py function
-            cleaned_summary = generate_markdown_report(summary)
+            cleaned_summary = summary
             self.current_iteration["running_summary"] = cleaned_summary
 
     def record_sources(self, sources: List[str]):
