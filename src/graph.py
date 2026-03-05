@@ -24,13 +24,11 @@ from src.nodes.utils import (
 )
 from src.nodes.search import async_multi_agents_network
 from src.nodes.report import (
-    generate_report,
-    reflect_on_report,
-    finalize_report,
-    route_research,
-    route_after_search,
-    route_after_multi_agents,
+    clarify_with_user,
+    write_research_brief,
+    write_draft_report,
 )
+from src.nodes.denoise_draft import denoise_draft
 
 # Backward-compatible re-exports used by agent_architecture.py
 from src.tools import SearchToolRegistry as ToolRegistry, ToolExecutor
@@ -48,28 +46,20 @@ def create_graph():
     )
 
     # Add all nodes
+    builder.add_node("clarify_with_user", clarify_with_user)
+    builder.add_node("write_research_brief", write_research_brief)
+    builder.add_node("write_draft_report", write_draft_report)
     builder.add_node("multi_agents_network", async_multi_agents_network)
-    builder.add_node("generate_report", generate_report)
-    builder.add_node("reflect_on_report", reflect_on_report)
-    builder.add_node("finalize_report", finalize_report)
+    builder.add_node("denoise_draft", denoise_draft)
 
     # === Edges ===
-    builder.add_edge(START, "multi_agents_network")
+    builder.add_edge(START, "clarify_with_user")
+    builder.add_edge("clarify_with_user", "write_research_brief")
+    builder.add_edge("write_research_brief", "write_draft_report")
+    builder.add_edge("write_draft_report", "multi_agents_network")
+    builder.add_edge("multi_agents_network", "denoise_draft")
+    builder.add_edge("denoise_draft", END)
 
-    # After search, always go to report generation
-    builder.add_edge("multi_agents_network", "generate_report")
-
-    # === Report Path ===
-    builder.add_edge("generate_report", "reflect_on_report")
-    builder.add_conditional_edges(
-        "reflect_on_report",
-        route_research,
-        {
-            "multi_agents_network": "multi_agents_network",
-            "finalize_report": "finalize_report",
-        },
-    )
-    builder.add_edge("finalize_report", END)
 
     return builder.compile()
 

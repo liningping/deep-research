@@ -12,18 +12,129 @@ import os
 import re
 import json
 import logging
-import asyncio
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
+
+try:
+    from scipy.stats import beta as beta_dist
+except ImportError:  # graceful fallback – scipy may not be installed
+    import random
+    class _BetaFallback:
+        @staticmethod
+        def rvs(a, b):
+            # Very rough approximation: mean + small jitter
+            return a / (a + b) + random.gauss(0, 0.05)
+    beta_dist = _BetaFallback()
 
 # Internal imports (Assumed available in the environment)
-from llm_clients import get_async_llm_client, MODEL_CONFIGS
+from llm_clients import get_async_llm_client
 from src.tools.executor import ToolExecutor
 from src.graph import ToolRegistry
 from src.prompts import query_writer_instructions
 from src.tools.tool_schema import TOPIC_DECOMPOSITION_FUNCTION
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Thompson Sampling Bandit Scheduler
+# ---------------------------------------------------------------------------
+
+class ThompsonBanditScheduler:
+    """
+    Multi-armed bandit scheduler using Thompson Sampling (Beta distribution).
+
+    Each subtask is treated as an "arm". On each round:
+      1. Draw a Beta(α, β) sample for every arm.
+      2. Select the arm with the highest sample.
+      3. Execute it, evaluate quality → reward ∈ [0, 1].
+      4. Update α += reward, β += (1 - reward).
+
+    Subtask identity (the arm key) is the `query` field of the subtask dict.
+    """
+
+    def __init__(self, subtasks: List[Dict]):
+        self.subtasks: List[Dict] = list(subtasks)  # mutable – arms may be added
+        # Beta distribution params: initialise with (α=1, β=1) → Uniform prior
+        self.distributions: Dict[str, Dict[str, float]] = {
+            self._key(t): {"alpha": 1.0, "beta": 1.0} for t in subtasks
+        }
+        self.satisfaction: Dict[str, float] = {self._key(t): 0.0 for t in subtasks}
+        self.n: Dict[str, int] = {self._key(t): 0 for t in subtasks}
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _key(subtask: Dict) -> str:
+        """Canonical identifier for a subtask arm."""
+        return subtask.get("query", str(subtask))
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def sample_subtask(self) -> Optional[Dict]:
+        """Thompson-sample all arms and return the subtask with the highest draw."""
+        if not self.subtasks:
+            return None
+        samples = {
+            self._key(t): beta_dist.rvs(
+                self.distributions[self._key(t)]["alpha"],
+                self.distributions[self._key(t)]["beta"]
+            )
+            for t in self.subtasks
+        }
+        best_key = max(samples, key=samples.get)
+        # Return the first subtask dict whose key matches
+        for t in self.subtasks:
+            if self._key(t) == best_key:
+                return t
+        return self.subtasks[0]  # fallback (should not happen)
+
+    def update(self, subtask: Dict, reward: float):
+        """Update Beta distribution parameters after observing `reward`."""
+        key = self._key(subtask)
+        if key not in self.distributions:
+            return
+        self.distributions[key]["alpha"] += reward
+        self.distributions[key]["beta"] += max(0.0, 1.0 - reward)
+        self.satisfaction[key] = self.satisfaction.get(key, 0.0) + reward
+        self.n[key] = self.n.get(key, 0) + 1
+
+    def add_subtask(self, subtask: Dict, warm_start_from: Optional[Dict] = None):
+        """
+        Dynamically add a new arm (e.g., a refined/evolved subtask).
+        If `warm_start_from` is given the new arm inherits its parent's
+        distribution (with slight exploration boost) rather than the flat prior.
+        """
+        key = self._key(subtask)
+        if key in self.distributions:
+            return  # already registered
+        if warm_start_from is not None:
+            parent_key = self._key(warm_start_from)
+            parent = self.distributions.get(parent_key, {"alpha": 1.0, "beta": 1.0})
+            alpha = parent["alpha"] * 1.2   # mild exploration boost
+            beta_v = parent["beta"] * 0.8
+        else:
+            alpha, beta_v = 2.0, 2.0  # slightly more informed than flat prior
+        self.distributions[key] = {"alpha": alpha, "beta": beta_v}
+        self.satisfaction[key] = 0.0
+        self.n[key] = 0
+        self.subtasks.append(subtask)
+        logger.info(f"🎰 [Bandit] Added new arm: '{key}' (α={alpha:.2f}, β={beta_v:.2f})")
+
+    def all_executed(self) -> bool:
+        """True when every arm has been pulled at least once."""
+        return all(self.n.get(self._key(t), 0) > 0 for t in self.subtasks)
+
+    def best_subtask(self) -> Optional[Dict]:
+        """Return the arm with the highest accumulated satisfaction."""
+        if not self.subtasks:
+            return None
+        return max(self.subtasks, key=lambda t: self.satisfaction.get(self._key(t), 0.0))
+
 
 class MasterResearchAgent:
     """
@@ -110,75 +221,15 @@ class MasterResearchAgent:
             self.logger.error(f"❌ [Decompose] Error: {e}")
             return {"topic_complexity": "simple", "query": query, "suggested_tool": "general_search"}
 
-    async def plan_research_from_tasks(self, query, tasks, state):
-        """
-        Generate specific queries for specific pending Todo tasks.
-        This represents the 'Agentic' behavior of mapping Intent -> Action.
-        """
-        self.logger.info(f"📋 [Planning] Creating plan for {len(tasks)} pending tasks...")
-        
-        task_list_str = "\n".join([f"{i+1}. [{t.id}] {t.description}" for i, t in enumerate(tasks)])
-        
-        prompt = f"""
-        You are a task-driven research agent.
-        MAIN TOPIC: {query}
-        
-        PENDING TASKS:
-        {task_list_str}
-        
-        Generate ONE search query for EACH task.
-        Return JSON format: {{ "queries": [ {{ "query": "...", "tool": "general_search", "completes_task_id": "..." }} ] }}
-        """
-
-        try:
-            llm = await self._get_llm()
-            response = await llm.ainvoke([{"role": "user", "content": prompt}])
-            
-            # Robust JSON extraction
-            content = response.content if hasattr(response, "content") else str(response)
-            match = re.search(r"```(?:json)?\n*(.*?)\n*```", content, re.DOTALL | re.IGNORECASE)
-            if match:
-                content = match.group(1).strip()
-            
-            start_idx = content.find('{')
-            end_idx = content.rfind('}')
-            if start_idx != -1 and end_idx != -1:
-                content = content[start_idx:end_idx+1]
-                
-            plan_data = json.loads(content)
-            
-            subtasks = []
-            for item in plan_data.get("queries", []):
-                subtasks.append({
-                    "type": "search",
-                    "query": item["query"],
-                    "description": f"Task execution: {item.get('completes_task_id')}",
-                    "source_type": "general",
-                    "completes_task_id": item.get("completes_task_id") # Critical for tracking
-                })
-            
-            return {
-                "topic_complexity": "task_driven",
-                "subtasks": subtasks,
-                "tasks_targeted": [t.id for t in tasks]
-            }
-        except Exception as e:
-            self.logger.warning(f"⚠️ [Planning] Task-driven planning failed, falling back to simple extraction. Error: {e}")
-            # Fallback: Just search for the task description
-            return {
-                "topic_complexity": "task_driven",
-                "subtasks": [{
-                    "type": "search",
-                    "query": t.description, 
-                    "completes_task_id": t.id,
-                    "source_type": "general"
-                } for t in tasks]
-            }
-
     async def execute_research(self, state):
         """
         Main Execution Loop.
-        Integrates Todo Management -> Planning -> Execution -> Feedback.
+        Integrates Todo Management -> Planning -> Bandit-driven Execution -> Feedback.
+
+        Instead of blindly executing all subtasks, a Thompson Sampling bandit
+        (ThompsonBanditScheduler) iteratively selects the most promising
+        subtask to run next, evaluates its result, and updates the arm
+        distributions accordingly.
         """
         self.state = state
         loop_count = getattr(state, "research_loop_count", 0)
@@ -188,113 +239,240 @@ class MasterResearchAgent:
 
         # --- STEP 1: INITIALIZE TODO (Loop 0 only) ---
         if loop_count == 0 and hasattr(state, "steering_todo"):
-             await self._create_initial_research_plan(query, state)
+            await self._create_initial_research_plan(query, state)
 
-        # --- STEP 2: DETERMINE STRATEGY ---
+        # --- STEP 2: DETERMINE STRATEGY & BUILD SUBTASK LIST ---
         research_plan = None
-        
+        subtasks = []
+
         # Check for Pending Tasks in Todo Manager
         pending_tasks = []
-        if hasattr(state, "steering_todo"):
+        if hasattr(state, "steering_todo") and state.steering_todo is not None:
             pending_tasks = state.steering_todo.get_pending_tasks()
-            # Sort by priority
             pending_tasks.sort(key=lambda t: t.priority, reverse=True)
-        
+
         if pending_tasks:
-            # Strategy A: Task-Driven (We have explicit things to do)
-            # Take top 3 tasks to avoid context overflow
-            top_tasks = pending_tasks[:3]
-            self.logger.info(f"🎯 [Strategy] Focusing on top {len(top_tasks)} high-priority tasks.")
-            
-            # Mark as in-progress
+            # Strategy A: Task-Driven
+            top_tasks = pending_tasks[:6]  # allow bandit to pick among top 6
+            self.logger.info(f"🎯 [Strategy] Bandit will choose among top {len(top_tasks)} pending tasks.")
             for t in top_tasks:
                 state.steering_todo.mark_task_in_progress(t.id)
-            
             research_plan = await self.plan_research_from_tasks(query, top_tasks, state)
+            subtasks = research_plan.get("subtasks", [])
         else:
-            # Strategy B: Exploration/Decomposition (No tasks, or tasks exhausted)
-            self.logger.info(f"🧭 [Strategy] No pending tasks. Performing standard decomposition.")
+            # Strategy B: Exploration / Decomposition
+            self.logger.info("🧭 [Strategy] No pending tasks – performing standard decomposition.")
             decomposition = await self.decompose_topic(query, getattr(state, "knowledge_gap", ""))
-            
-            # Convert decomposition to a plan format
-            subtasks = []
             if decomposition["topic_complexity"] == "complex":
                 for sub in decomposition.get("subtopics", []):
                     subtasks.append({"type": "search", "query": sub, "source_type": "general"})
             else:
                 subtasks.append({"type": "search", "query": decomposition["query"], "source_type": "general"})
-            
             research_plan = {"topic_complexity": decomposition["topic_complexity"], "subtasks": subtasks}
 
-        # --- STEP 3: EXECUTE SEARCH ---
-        search_results = await self._execute_search_tasks(research_plan, state)
+        # --- STEP 3: BANDIT-DRIVEN EXECUTION ---
+        # Cap iterations: at most 2× the number of arms (ensures every arm is
+        # visited at least once while still allowing the bandit to exploit good arms).
+        max_steps = max(len(subtasks) * 2, 6)
+        search_results = await self._run_bandit_loop(subtasks, state, max_steps=max_steps)
 
         # --- STEP 4: UPDATE TODO & FEEDBACK ---
-        if hasattr(state, "steering_todo") and research_plan.get("topic_complexity") == "task_driven":
+        if hasattr(state, "steering_todo") and state.steering_todo is not None and \
+                research_plan.get("topic_complexity") == "task_driven":
             await self._update_todo_based_on_results(search_results, state)
 
-        # --- STEP 5: VISUALIZATION (Simplified) ---
-        # (Assuming Visualization Logic exists elsewhere or is simplified here)
-        # For brevity, returning the search results primarily.
-        
         return {
             "web_research_results": search_results,
             "research_plan": research_plan
         }
 
-    async def _execute_search_tasks(self, plan, state):
-        """Execute searches with steering checks (deduplication/cancellation)."""
+    # ------------------------------------------------------------------
+    # Thompson Bandit Loop
+    # ------------------------------------------------------------------
+
+    async def _run_bandit_loop(
+        self,
+        subtasks: List[Dict],
+        state,
+        max_steps: int = 10,
+    ) -> List[Dict]:
+        """
+        Core bandit loop (Algorithm 1 – Thompson Sampling).
+
+        For each step:
+          1. Sample all Beta arms → select highest draw.
+          2. Execute the chosen subtask via SearchAgent.
+          3. Evaluate quality with LLM → reward ∈ [0, 1].
+          4. Update the arm's Beta distribution.
+          5. If LLM flags modification needed, add an evolved variant arm.
+
+        Args:
+            subtasks:  List of subtask dicts (must have "query" key).
+            state:     Research state (used for dedup tracking).
+            max_steps: Maximum bandit iterations.
+
+        Returns:
+            Aggregated list of search result dicts.
+        """
+        if not subtasks:
+            return []
+
+        scheduler = ThompsonBanditScheduler(subtasks)
         search_agent = SearchAgent(self.config)
-        results = []
-        
-        tasks = plan.get("subtasks", [])
-        if not tasks: return []
+        all_results: List[Dict] = []
 
-        self.logger.info(f"⚡ [Search] Executing {len(tasks)} queries...")
+        self.logger.info(
+            f"🎰 [Bandit] Starting Thompson Sampling loop | arms={len(subtasks)} | max_steps={max_steps}"
+        )
 
-        for task in tasks:
-            query = task.get("query")
-            
-            # Steering Check: Deduplication
-            if hasattr(state, "steering_todo") and state.steering_todo.is_query_duplicate(query):
-                self.logger.info(f"⏭️ [Search] Skipping duplicate: '{query}'")
-                continue
+        for step in range(max_steps):
+            # 1. Select best arm via Thompson sample
+            chosen = scheduler.sample_subtask()
+            if chosen is None:
+                break
 
-            # Execute
+            query = chosen.get("query", "")
+
+            # Deduplication guard (steering_todo tracks executed queries)
+            if hasattr(state, "steering_todo") and state.steering_todo is not None:
+                if state.steering_todo.is_query_duplicate(query):
+                    self.logger.info(f"⏭️  [Bandit] Step {step}: duplicate query skipped – '{query}'")
+                    # Penalise arm slightly so it is deprioritised
+                    scheduler.update(chosen, reward=0.1)
+                    # If all remaining arms are duplicates, stop early
+                    if scheduler.all_executed():
+                        break
+                    continue
+
+            # 2. Execute search
             try:
-                # Execute task securely (includes exact dispatch and normalization)
-                res = await search_agent.execute_task(task)
-                
-                # Mark executed
-                if hasattr(state, "steering_todo"):
+                res = await search_agent.execute_task(chosen)
+                if hasattr(state, "steering_todo") and state.steering_todo is not None:
                     state.steering_todo.mark_query_executed(query)
+            except Exception as exc:
+                self.logger.error(f"❌ [Bandit] Search failed for '{query}': {exc}")
+                res = {"success": False, "content": "", "sources": [], "error": str(exc)}
 
-                # Format Result (execute_task returns normalized format)
-                success = res.get("success", False)
-                results.append({
-                    "query": query,
-                    "success": success,
-                    "content": res.get("content", ""),
-                    "sources": res.get("sources", []),
-                    "error": res.get("error"),
-                    "completes_task_id": task.get("completes_task_id") # Pass through for feedback
-                })
-                
-                log_icon = "✅" if success else "⚠️"
-                self.logger.info(f"{log_icon} [Search] '{query}' -> {len(res.get('sources', []))} sources")
+            result_entry = {
+                "query": query,
+                "success": res.get("success", False),
+                "content": res.get("content", ""),
+                "sources": res.get("sources", []),
+                "error": res.get("error"),
+                "completes_task_id": chosen.get("completes_task_id"),
+            }
+            all_results.append(result_entry)
 
-            except Exception as e:
-                self.logger.error(f"❌ [Search] Failed '{query}': {e}", exc_info=True)
-                results.append({
-                    "query": query, 
-                    "success": False, 
-                    "content": "", 
-                    "sources": [], 
-                    "error": str(e),
-                    "completes_task_id": task.get("completes_task_id")
-                })
+            # 3. Evaluate quality → reward
+            reward, needs_modification = await self._evaluate_subtask(chosen, res)
 
-        return results
+            log_icon = "✅" if res.get("success") else "⚠️"
+            self.logger.info(
+                f"{log_icon} [Bandit] Step {step}: '{query}' | "
+                f"reward={reward:.2f} | sources={len(res.get('sources', []))} | "
+                f"modify={needs_modification}"
+            )
+
+            # 4. Update arm distribution
+            scheduler.update(chosen, reward)
+
+            # 5. Evolve arm if LLM suggests modification
+            if needs_modification:
+                evolved = self._evolve_subtask(chosen)
+                scheduler.add_subtask(evolved, warm_start_from=chosen)
+                self.logger.info(f"🔬 [Bandit] Evolved arm added: '{evolved.get('query')}'")
+
+            # Early exit: once every original arm has been tried, let the
+            # scheduler exploit until all new arms are also exhausted.
+            if scheduler.all_executed() and step >= len(subtasks) - 1:
+                self.logger.info(f"🏁 [Bandit] All arms executed after {step + 1} steps – stopping early.")
+                break
+
+        self.logger.info(
+            f"🎰 [Bandit] Loop complete | steps={min(step+1, max_steps)} | results={len(all_results)}"
+        )
+        return all_results
+
+    async def _evaluate_subtask(
+        self,
+        subtask: Dict,
+        result: Dict,
+    ) -> Tuple[float, bool]:
+        """
+        LLM-based quality evaluator for a completed subtask.
+
+        Prompts the LLM with the query and a summary of results, asking for:
+          - A quality score in [0, 1]
+          - Whether the subtask needs refinement / modification
+
+        Returns:
+            (reward: float, needs_modification: bool)
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+        from src.utils import clean_json_response
+        from src.nodes.utils import get_configurable
+
+        try:
+            configurable = get_configurable(self.config)
+            
+            provider_attr = getattr(self.state, "llm_provider", None) if self.state else None
+            provider = provider_attr or configurable.llm_provider
+            if not isinstance(provider, str): provider = provider.value
+            
+            model_attr = getattr(self.state, "llm_model", None) if self.state else None
+            model = model_attr or configurable.llm_model or "gemini-2.5-pro"
+            
+            llm = await get_async_llm_client(provider, model)
+            
+            query = subtask.get("query", "")
+            content_preview = str(result.get("content", ""))[:800]
+            source_count = len(result.get("sources", []))
+
+            eval_prompt = (
+                f"You are evaluating the quality of a research search step.\n\n"
+                f"Search Query: {query}\n"
+                f"Sources Found: {source_count}\n"
+                f"Content Preview:\n{content_preview}\n\n"
+                f"Rate the result on two dimensions:\n"
+                f"1. quality_score: float in [0.0, 1.0] reflecting relevance, depth, and source count.\n"
+                f"   - 0.0 = no useful content; 0.5 = partial; 1.0 = excellent.\n"
+                f"2. needs_modification: boolean – true if the query should be refined or split.\n\n"
+                f"Respond with ONLY a valid JSON object, e.g. "
+                f'{{"quality_score": 0.75, "needs_modification": false}}'
+            )
+
+            # Using ainvoke mapped to the LangChain interface
+            response = await llm.ainvoke([
+                SystemMessage(content="You evaluate research search quality. Respond only with JSON."),
+                HumanMessage(content=eval_prompt)
+            ])
+
+            content = response.content if hasattr(response, "content") else str(response)
+            parsed = clean_json_response(content)
+            
+            score = float(parsed.get("quality_score", 0.5))
+            score = max(0.0, min(1.0, score))  # clamp
+            needs_mod = bool(parsed.get("needs_modification", False))
+            return score, needs_mod
+
+        except Exception as exc:
+            self.logger.warning(f"⚠️  [Bandit] Evaluator error for '{subtask.get('query')}': {exc}")
+            # Fallback: heuristic reward based on source count
+            source_count = len(result.get("sources", []))
+            reward = min(1.0, source_count / 5.0) if result.get("success") else 0.0
+            return reward, False
+
+    @staticmethod
+    def _evolve_subtask(subtask: Dict) -> Dict:
+        """
+        Create a refined variant of the given subtask when the LLM decides
+        the original query needs modification. The variant appends a
+        clarifying suffix to the query so it becomes a distinct arm.
+        """
+        original_query = subtask.get("query", "")
+        evolved = dict(subtask)  # shallow copy preserves all metadata
+        evolved["query"] = f"{original_query} – detailed analysis"
+        return evolved
 
     async def _create_initial_research_plan(self, query, state):
         """Decompose original query into the first set of Todo items."""
@@ -312,22 +490,6 @@ class MasterResearchAgent:
         
         self.logger.info(f"📝 [Todo] Created {len(subtopics) + 1} initial tasks.")
 
-    async def _update_todo_based_on_results(self, results, state):
-        """Mark tasks as completed based on search success."""
-        completed_count = 0
-        for res in results:
-            task_id = res.get("completes_task_id")
-            if task_id and res.get("success"):
-                sources_list = res.get("sources", [])
-                query_str = res.get("query", "")
-                state.steering_todo.mark_task_completed(
-                    task_id=task_id,
-                    completion_note=f"Found {len(sources_list)} sources via query '{query_str}'"
-                )
-                completed_count += 1
-        
-        if completed_count > 0:
-            self.logger.info(f"🏁 [Todo] Automatically marked {completed_count} tasks as COMPLETED.")
 
 class SearchAgent:
     """
@@ -369,8 +531,6 @@ class SearchAgent:
         self.logger.info(f"🔍 [Search] '{tool_name}' -> '{query}'")
 
         try:
-            # Execute specific search method
-            raw_result = None
             if tool_name == "academic_search":
                 raw_result = await self.academic_search(query)
             elif tool_name == "github_search":

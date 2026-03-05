@@ -823,55 +823,6 @@ Research Completeness Criteria with Uploaded Knowledge:
 - LOW COMPLETENESS: Neither uploaded knowledge nor web research adequately covers key aspects
 </AUGMENT_KNOWLEDGE_EVALUATION>
 
-<TODO_DRIVEN_REFLECTION>
-CRITICAL: This research uses a task queue to track what needs to be researched.
-
-=== PENDING TASKS (Need Your Evaluation) ===
-{pending_tasks}
-
-=== ALREADY COMPLETED (For Context Only) ===
-{completed_tasks}
-
-=== USER STEERING MESSAGES (if any, HIGHEST PRIORITY!) ===
-{steering_messages}
-
-YOUR TASK - Update the todo list:
-
-1. MARK COMPLETED: Which PENDING tasks were addressed in this research loop?
-   - Review ONLY the pending tasks listed above
-   - Check if the current summary now covers those areas
-   - Return their task_ids in "mark_completed" list
-   - IMPORTANT: ONLY evaluate the PENDING tasks - do NOT mark tasks from "ALREADY COMPLETED"
-
-2. CANCEL TASKS: Which pending tasks are no longer relevant?
-   - Based on current findings OR user steering messages
-   - Cancel tasks that don't align with the research direction
-   - Return their task_ids in "cancel_tasks" list
-
-3. ADD NEW TASKS: What critical areas still need research?
-   - **FIRST PRIORITY**: If user sent steering messages above, create specific tasks to address each steering request
-   - Then, identify other knowledge gaps in the current summary
-   - IMPORTANT: Check "ALREADY COMPLETED" section to avoid creating duplicate tasks
-   - Each new task = one specific search topic
-   - Keep tasks simple and searchable (e.g. "Research X's work at Y", "Find X's publications in Z")
-   - Return as objects with "description", "rationale", and "source" in "add_tasks" list
-   - **Source field REQUIRED**: "steering_message" (for user requests), "knowledge_gap" (for system-identified gaps), or "original_query" (for initial query aspects)
-
-4. CLEAR MESSAGES: Which steering messages are FULLY ADDRESSED?
-   - Steering messages above are indexed like [0] "message text", [1] "another message", etc.
-   - Return indices (e.g., [0, 1]) of messages that are now fully covered by tasks
-   - Only clear a message if ALL its aspects have corresponding tasks (new or existing)
-   - If uncertain whether a message is fully addressed, don't clear it yet
-   - Return empty list [] if no messages to clear
-
-RULES:
-- ONLY mark tasks as completed if they're in the "PENDING TASKS" section above
-- DO NOT create tasks similar to those in "ALREADY COMPLETED" section
-- Each task = one Tavily search query
-- Focus on WHAT to search, not HOW to organize
-- ALWAYS include "source" field in new tasks
-- ALWAYS include "clear_messages" field in response (can be empty list [])
-</TODO_DRIVEN_REFLECTION>
 
 <TOPIC_FOCUS_DIRECTIVE>
 CRITICAL: All identified knowledge gaps and follow-up queries MUST directly relate to the original research topic "{research_topic}".
@@ -1270,32 +1221,6 @@ Format the response as JSON with these keys:
 - "follow_up_query": A single query (<400 chars) targeting the missing info (MUST be "none" if research_complete is true)
 - "evaluation_notes": Brief overall commentary on strengths/weaknesses
 - "research_topic": Include the original research topic unchanged - this is REQUIRED for system processing
-- "todo_updates": Simple todo list updates (REQUIRED when todo context is provided):
-  {{
-    "mark_completed": ["task_1_1727812345", "task_2_1727812346"],
-    "cancel_tasks": ["task_3_1727812347"],
-    "add_tasks": [
-      {{
-        "description": "Research Silvio Savarese's work at Salesforce",
-        "rationale": "User requested focus on Salesforce work",
-        "source": "steering_message"
-      }},
-      {{
-        "description": "Find Silvio Savarese's recent publications 2023-2024",
-        "rationale": "Need recent work to complete profile",
-        "source": "knowledge_gap"
-      }}
-    ],
-    "clear_messages": [0]
-  }}
-  
-  CRITICAL NOTES:
-  • Task IDs are shown in the todo context as **[task_id]** - use the EXACT IDs
-  • mark_completed: Copy task IDs from "Active Steering Instructions" that were covered
-  • cancel_tasks: Copy task IDs from "Active Steering Instructions" that are no longer needed
-  • add_tasks: New tasks to add (description + rationale + source, system generates IDs)
-  • source: REQUIRED - "steering_message", "knowledge_gap", or "original_query"
-  • clear_messages: List of message indices that are fully addressed (e.g., [0, 1] or [])
 
 CRITICAL OUTPUT FORMAT:
 You MUST wrap your JSON response in <answer></answer> tags like this:
@@ -1992,4 +1917,102 @@ Your report should follow this general format structure:
 3. LangChain Best Practices - Official Guide: https://langchain.org/best-practices
 
 Now, create a comprehensive, professional research report on {research_topic} that follows these requirements exactly. Focus on creating a polished, publication-ready document that integrates all your research findings with proper citations, clear structure, and a professional presentation. Use proper markdown formatting throughout, with appropriate heading levels, emphasis, and highlighting of key terms.
+"""
+
+
+# ==================== Clarify With User Instructions ====================
+# Used by clarify_with_user node to assess if the research topic has enough context
+clarify_with_user_instructions = r"""
+<TIME_CONTEXT>
+Current date: {current_date}
+Current year: {current_year}
+</TIME_CONTEXT>
+
+You are an expert research assistant. Your task is to evaluate whether the user's research request contains sufficient detail and clarity to proceed with in-depth research.
+
+<USER_REQUEST>
+{research_topic}
+</USER_REQUEST>
+
+<EVALUATION_CRITERIA>
+Assess the request on these dimensions:
+1. **Topic Clarity**: Is the research topic clearly defined? Can you unambiguously identify what needs to be researched?
+2. **Scope Definition**: Is the scope clear enough to guide the research (broad overview vs. deep dive on a specific aspect)?
+3. **Intent**: Can you determine what the user wants (analysis, comparison, factual summary, trend exploration, etc.)?
+4. **Constraints**: Are there any implicit or explicit constraints (time period, region, industry, etc.) that are sufficiently defined?
+
+A request is sufficient if:
+- The core topic is identifiable
+- The general direction of research is clear
+- Even if broad, it can be meaningfully decomposed into subtopics
+
+A request needs clarification if:
+- It is ambiguous (could mean multiple completely different things)
+- Critical context is missing that would lead to entirely different research directions
+- It is too vague to produce any structured research plan
+</EVALUATION_CRITERIA>
+
+<OUTPUT_FORMAT>
+Respond with a JSON object:
+{{
+    "need_clarification": true/false,
+    "confidence": 0.0-1.0,
+    "question": "Your clarifying question if needed, empty string if not",
+    "reasoning": "Brief explanation of your assessment"
+}}
+</OUTPUT_FORMAT>
+"""
+
+
+# ==================== Research Brief Instructions ====================
+# Used by write_research_brief node to generate a structured research brief
+research_brief_instructions = r"""
+<TIME_CONTEXT>
+Current date: {current_date}
+Current year: {current_year}
+One year ago: {one_year_ago}
+</TIME_CONTEXT>
+
+You are a senior research analyst. Your task is to transform the user's research request into a comprehensive, structured research brief that will guide an automated deep research process.
+
+<RESEARCH_REQUEST>
+{research_topic}
+</RESEARCH_REQUEST>
+
+<USER_PROVIDED_KNOWLEDGE>
+{uploaded_knowledge}
+</USER_PROVIDED_KNOWLEDGE>
+
+<BRIEF_REQUIREMENTS>
+Generate a detailed research brief that includes:
+
+1. **Research Title**: A clear, descriptive title for the research project
+
+2. **Executive Objective**: 1-2 sentences describing the core goal of this research
+
+3. **Scope & Boundaries**:
+   - What is IN scope (specific aspects, time periods, geographies, etc.)
+   - What is OUT of scope (to prevent topic drift)
+
+4. **Key Research Questions**: 3-7 specific questions that the research must answer. These should be:
+   - Concrete and answerable through web research
+   - Ordered by priority (most critical first)
+   - Covering different aspects of the topic
+
+5. **Expected Subtopics**: Decompose the research into 3-5 major subtopics or sections that a comprehensive report should cover
+
+6. **Methodology Guidance**:
+   - What types of sources should be prioritized (academic, industry, government, news)?
+   - What recency constraints apply (only recent data vs. historical context needed)?
+   - Any specific data points or metrics to look for
+
+7. **Quality Criteria**: What makes this research "complete"? Define 3-5 measurable success criteria
+
+IMPORTANT:
+- If user-provided knowledge is available, incorporate it as baseline context and focus the brief on areas that need additional research
+- Be specific and actionable — avoid generic statements
+- The brief should enable automated research agents to work effectively without further human guidance
+</BRIEF_REQUIREMENTS>
+
+Generate the research brief as a structured text document. Do NOT wrap it in JSON — return it as formatted plain text with clear section headers.
 """

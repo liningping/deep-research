@@ -95,6 +95,9 @@ class SummaryState(BaseModel):
 
     llm_provider: Optional[str] = Field(default=None, description="LLM provider")
     llm_model: Optional[str] = Field(default=None, description="LLM model")
+    research_brief: str = Field(
+        default="", description="Generated research brief from topic analysis"
+    )
     uploaded_knowledge: Optional[str] = Field(
         default=None, description="User-uploaded external knowledge"
     )
@@ -484,6 +487,7 @@ class SummaryStateInput(BaseModel):
     )
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    research_brief: str = ""
     uploaded_knowledge: Optional[str] = None
     uploaded_files: Optional[List[str]] = None
     config: Optional[Dict[str, Any]] = None
@@ -500,6 +504,7 @@ class SummaryStateOutput(BaseModel):
     """
 
     running_summary: str
+    research_brief: str = ""
     research_complete: bool
     research_loop_count: int
     sources_gathered: List[str]
