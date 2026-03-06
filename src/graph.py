@@ -1,68 +1,57 @@
 """
 Research Graph Module
 
-This module defines the LangGraph-based research workflow.
-All node implementations are in the src/nodes/ package.
-This file contains only:
-- create_graph(): Factory function that assembles the graph
-- Backward-compatible re-exports for external code
+All routing is defined here via explicit add_edge calls.
+Nodes only return state update dicts; no node uses Command(goto=...) except
+clarify_with_user's conditional END branch.
+
+Pipeline (Option 2 – directional draft before research):
+  START
+    → clarify_with_user         (conditional END if clarification needed)
+    → write_research_brief      writes: research_brief
+    → write_draft_report        writes: draft_report  ← from brief only, pre-research
+    → decompose_topic           writes: research_plan
+    → execute_research          reads:  research_plan + draft_report (gap detection)
+                                writes: web_research_results
+    → final_report_generation   reads:  draft_report + web_research_results
+                                writes: final_report
+    → END
 """
 
 from langgraph.graph import START, END, StateGraph
 
-from src.state import SummaryState, SummaryStateInput, SummaryStateOutput
-from src.configuration import Configuration
+from deep_research.state_scope import AgentState, AgentInputState
 
-# Import all node functions from the nodes package
-from src.nodes.utils import (
-    get_callback_from_config,
-    emit_event,
-    get_max_loops,
-    reset_state,
-    heartbeat_task,
-    get_configurable,
-)
-from src.nodes.search import async_multi_agents_network
-from src.nodes.report import (
-    clarify_with_user,
+from deep_research.research_agent_scope import (
     write_research_brief,
     write_draft_report,
 )
-from src.nodes.denoise_draft import denoise_draft
-
-# Backward-compatible re-exports used by agent_architecture.py
-from src.tools import SearchToolRegistry as ToolRegistry, ToolExecutor
+from deep_research.research_agent_decompose import decompose_topic
+from deep_research.research_agent_execute import execute_research
+from deep_research.research_agent_denoise import final_report_generation
 
 
 def create_graph():
-    """
-    Factory function that creates a fresh graph instance.
-    """
-    builder = StateGraph(
-        SummaryState,
-        input=SummaryStateInput,
-        output=SummaryStateOutput,
-        config_schema=Configuration,
-    )
+    """Create and compile the research workflow graph."""
+    builder = StateGraph(AgentState, input=AgentInputState)
 
-    # Add all nodes
-    builder.add_node("clarify_with_user", clarify_with_user)
-    builder.add_node("write_research_brief", write_research_brief)
-    builder.add_node("write_draft_report", write_draft_report)
-    builder.add_node("multi_agents_network", async_multi_agents_network)
-    builder.add_node("denoise_draft", denoise_draft)
+    # ── Nodes ─────────────────────────────────────────────────────────────────
+    builder.add_node("write_research_brief",    write_research_brief)
+    builder.add_node("write_draft_report",      write_draft_report)
+    builder.add_node("decompose_topic",         decompose_topic)
+    builder.add_node("execute_research",        execute_research)
+    builder.add_node("final_report_generation", final_report_generation)
 
-    # === Edges ===
-    builder.add_edge(START, "clarify_with_user")
-    builder.add_edge("clarify_with_user", "write_research_brief")
-    builder.add_edge("write_research_brief", "write_draft_report")
-    builder.add_edge("write_draft_report", "multi_agents_network")
-    builder.add_edge("multi_agents_network", "denoise_draft")
-    builder.add_edge("denoise_draft", END)
-
+    # ── Edges ──────────────────────────────────────────────────────────────────
+    builder.add_edge("clarify_with_user",        "write_research_brief")
+    builder.add_edge("write_research_brief",     "write_draft_report")
+    builder.add_edge("write_draft_report",       "decompose_topic")
+    builder.add_edge("decompose_topic",          "execute_research")
+    builder.add_edge("execute_research",         "final_report_generation")
+    builder.add_edge("final_report_generation",  END)
 
     return builder.compile()
 
 
-graph = create_graph()  # Export a compiled instance for LangGraph Studio
-create_fresh_graph = create_graph  # Factory function for programmatic use
+graph = create_graph()          # Compiled instance for LangGraph Studio
+create_fresh_graph = create_graph  # Factory alias
