@@ -25,7 +25,6 @@ from src.nodes.utils import (
 from src.nodes.search import async_multi_agents_network
 from src.nodes.report import (
     generate_report,
-    reflect_on_report,
     finalize_report,
     route_research,
     route_after_search,
@@ -50,7 +49,6 @@ def create_graph():
     # Add all nodes
     builder.add_node("multi_agents_network", async_multi_agents_network)
     builder.add_node("generate_report", generate_report)
-    builder.add_node("reflect_on_report", reflect_on_report)
     builder.add_node("finalize_report", finalize_report)
 
     # === Edges ===
@@ -60,15 +58,16 @@ def create_graph():
     builder.add_edge("multi_agents_network", "generate_report")
 
     # === Report Path ===
-    builder.add_edge("generate_report", "reflect_on_report")
+    # After generating report, decide if we loop back for more research or finish
     builder.add_conditional_edges(
-        "reflect_on_report",
+        "generate_report",
         route_research,
         {
             "multi_agents_network": "multi_agents_network",
             "finalize_report": "finalize_report",
-        },
+        }
     )
+    
     builder.add_edge("finalize_report", END)
 
     return builder.compile()

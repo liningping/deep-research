@@ -136,6 +136,7 @@ class SimpleOpenAIClient:
         self._client = openai.OpenAI(
             api_key=OPENAI_API_KEY,
             base_url=OPENAI_BASE_URL,
+            timeout=300.0,
         )
 
     @traceable
@@ -258,6 +259,7 @@ def get_llm_client(provider, model_name=None):
             base_url=OPENAI_BASE_URL,
             max_tokens=OPENAI_MAX_TOKENS,
             streaming=False,
+            timeout=300.0,
         )
 
 
@@ -297,6 +299,7 @@ async def get_async_llm_client(provider, model_name=None):
         base_url=OPENAI_BASE_URL,
         max_tokens=OPENAI_MAX_TOKENS,
         streaming=False,
+        timeout=300.0,
     )
 
 

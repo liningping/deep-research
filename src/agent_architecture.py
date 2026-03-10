@@ -190,7 +190,39 @@ class MasterResearchAgent:
         if loop_count == 0 and hasattr(state, "steering_todo"):
              await self._create_initial_research_plan(query, state)
 
-        # --- STEP 2: DETERMINE STRATEGY ---
+        # Loop counting is now handled globally in route_research
+        next_research_loop_count = loop_count + 1
+        if hasattr(state, "research_loop_count"):
+            state.research_loop_count = next_research_loop_count
+
+        # --- PRE-STEP 2: REFLECT ON PENDING TASKS ---
+        if hasattr(state, "steering_todo"):
+            self.logger.info("🔍 [Reflection] Reflecting on todo manager records before planning...")
+            try:
+                from src.reflect import reflect_on_report
+                # reflect_on_report is synchronous and performs LLM I/O, so run it in a thread
+                reflection_result = await asyncio.to_thread(reflect_on_report, state, self.config)
+                
+                # Apply all returned attributes to state perfectly
+                for key, value in reflection_result.items():
+                    if hasattr(state, key):
+                        setattr(state, key, value)
+                
+                # Update the local query variable used subsequently in execute_research
+                if getattr(state, "search_query", None):
+                    query = state.search_query
+                
+                if getattr(state, "research_complete", False):
+                    self.logger.info("🛑 [Reflection] Research is marked complete, skipping further search.")
+                    return {
+                        "web_research_results": [],
+                        "research_plan": {"topic_complexity": "completed", "subtasks": []}
+                    }
+                    
+            except Exception as e:
+                self.logger.error(f"❌ [Reflection] Error during reflection: {e}")
+
+        # --- STEP 3: DETERMINE STRATEGY ---
         research_plan = None
         
         # Check for Pending Tasks in Todo Manager
@@ -214,28 +246,51 @@ class MasterResearchAgent:
         else:
             # Strategy B: Exploration/Decomposition (No tasks, or tasks exhausted)
             self.logger.info(f"🧭 [Strategy] No pending tasks. Performing standard decomposition.")
-            decomposition = await self.decompose_topic(query, getattr(state, "knowledge_gap", ""))
+            
+            # If the query is already an explicit follow-up question (e.g. from reflection)
+            # and we are loops deep, don't force decompose it into wide arrays.
+            if loop_count > 0 and getattr(state, "search_query", ""):
+                self.logger.info(f"⏭️  [Strategy] Query is an explicit follow-up ({query[:30]}...). Skipping decomposition.")
+                decomposition = {
+                    "topic_complexity": "simple",
+                    "query": query
+                }
+            else:
+                decomposition = await self.decompose_topic(query, getattr(state, "knowledge_gap", ""))
             
             # Convert decomposition to a plan format
             subtasks = []
             if decomposition["topic_complexity"] == "complex":
                 for sub in decomposition.get("subtopics", []):
-                    subtasks.append({"type": "search", "query": sub, "source_type": "general"})
+                    # Add to todo manager so it can be tracked
+                    if hasattr(state, "steering_todo"):
+                        tid = state.steering_todo.create_task(
+                            description=sub, priority=5, source="decomposition"
+                        )
+                        state.steering_todo.mark_task_in_progress(tid)
+                        subtasks.append({"type": "search", "query": sub, "source_type": "general", "task_id": tid})
+                    else:
+                        subtasks.append({"type": "search", "query": sub, "source_type": "general"})
             else:
-                subtasks.append({"type": "search", "query": decomposition["query"], "source_type": "general"})
+                q = decomposition["query"]
+                if hasattr(state, "steering_todo"):
+                    tid = state.steering_todo.create_task(
+                        description=q, priority=5, source="decomposition"
+                    )
+                    state.steering_todo.mark_task_in_progress(tid)
+                    subtasks.append({"type": "search", "query": q, "source_type": "general", "task_id": tid})
+                else:
+                    subtasks.append({"type": "search", "query": q, "source_type": "general"})
             
             research_plan = {"topic_complexity": decomposition["topic_complexity"], "subtasks": subtasks}
 
-        # --- STEP 3: EXECUTE SEARCH ---
+        # --- STEP 4: EXECUTE SEARCH ---
         search_results = await self._execute_search_tasks(research_plan, state)
 
-        # --- STEP 4: UPDATE TODO & FEEDBACK ---
-        if hasattr(state, "steering_todo") and research_plan.get("topic_complexity") == "task_driven":
+        # --- STEP 5: UPDATE TODO & FEEDBACK ---
+        # Update todo manager for ANY search results that have attached task_ids
+        if hasattr(state, "steering_todo"):
             await self._update_todo_based_on_results(search_results, state)
-
-        # --- STEP 5: VISUALIZATION (Simplified) ---
-        # (Assuming Visualization Logic exists elsewhere or is simplified here)
-        # For brevity, returning the search results primarily.
         
         return {
             "web_research_results": search_results,
