@@ -560,8 +560,8 @@ async def run_single_research_task_with_trajectory(
         recorder.query = original_query  # Use original query for recorder
 
     try:
-        from src.state import SummaryState
-        from src.graph import create_graph
+        from deep_research.research_agent_full import agent as fresh_graph
+        from langchain_core.messages import HumanMessage
 
         if not provider:
             provider = os.environ.get("LLM_PROVIDER", "openai")
@@ -572,8 +572,6 @@ async def run_single_research_task_with_trajectory(
         os.environ["MAX_WEB_RESEARCH_LOOPS"] = str(max_web_search_loops)
         os.environ["LLM_PROVIDER"] = provider
         os.environ["LLM_MODEL"] = model
-
-        fresh_graph = create_graph()
 
         if isinstance(dataset_manager, DeepConsultDatasetManager):
             benchmark_type = "DEEPCONSULT"
@@ -614,36 +612,9 @@ async def run_single_research_task_with_trajectory(
             },
         }
 
-        initial_state = SummaryState(
-            research_topic=query,
-            search_query=query,
-            running_summary="",
-            research_complete=False,
-            knowledge_gap="",
-            research_loop_count=0,
-            sources_gathered=[],
-            web_research_results=[],
-            search_results_empty=False,
-            selected_search_tool="general_search",
-            source_citations={},
-            subtopic_queries=[],
-            subtopics_metadata=[],
-            extra_effort=extra_effort,
-            minimum_effort=minimum_effort,
-
-            visualization_disabled=visualization_disabled,
-            llm_provider=provider,
-            llm_model=model,
-            uploaded_knowledge=None,
-            uploaded_files=[],
-            uploaded_images=[],
-            current_node=None,
-            previous_node=None,
-            steering_enabled=True,
-            steering_feedback=None,
-            steering_todo=True,
-            steering_todo_visible=False,
-        )
+        initial_state = {
+            "messages": [HumanMessage(content=query)]
+        }
 
         graph_start_time = datetime.now()
         logger.info(f"[Task {task_id}] Starting graph execution...")
@@ -879,8 +850,8 @@ async def run_single_research_task_with_trajectory(
             f"[Task {task_id}] Graph completed in {graph_duration.total_seconds():.2f}s"
         )
 
-        # Extract final content (match working version logic)
-        final_summary = result.get("running_summary", "No summary generated")
+        # Extract final content (support both old SummaryState and new AgentState format)
+        final_summary = result.get("final_report") or result.get("draft_report") or result.get("running_summary", "No summary generated")
 
         # Handle case where summary might be a list (convert to string)
         if isinstance(final_summary, list):
@@ -888,31 +859,7 @@ async def run_single_research_task_with_trajectory(
         elif not isinstance(final_summary, str):
             final_summary = str(final_summary)
 
-        markdown_report = result.get("markdown_report", "")
-        # Handle if markdown_report is also a list or other non-string type
-        if isinstance(markdown_report, list):
-            markdown_report = "\n\n".join(str(s) for s in markdown_report)
-        elif not isinstance(markdown_report, str):
-            markdown_report = str(markdown_report) if markdown_report else ""
-
-        if markdown_report and markdown_report.strip():
-            # Find the start of Executive Summary section and trim TOC
-            exec_summary_start = markdown_report.find("## Executive Summary\n")
-            if exec_summary_start >= 0:
-                final_content = markdown_report[exec_summary_start:]
-                logger.info(
-                    f"[Task {task_id}] Using clean markdown report (from Executive Summary)"
-                )
-            else:
-                final_content = markdown_report
-                logger.info(
-                    f"[Task {task_id}] Using complete markdown report (no Executive Summary found)"
-                )
-        else:
-            final_content = final_summary
-            logger.info(
-                f"[Task {task_id}] Using running summary (no markdown report available)"
-            )
+        final_content = final_summary
 
         task_end_time = datetime.now()
         total_duration = task_end_time - task_start_time
