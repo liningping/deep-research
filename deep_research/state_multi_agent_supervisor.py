@@ -41,6 +41,9 @@ class ConductResearch(BaseModel):
     research_topic: str = Field(
         description="The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).",
     )
+    verification_assertions: list[str] = Field(
+        description="A list of strict natural language assertions that the research findings must satisfy to be considered successful (e.g., 'Must contain specific Q3 revenue numbers').",
+    )
 
 @tool
 class ResearchComplete(BaseModel):
