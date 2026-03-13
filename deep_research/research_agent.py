@@ -93,7 +93,10 @@ def tool_node(state: ResearcherState):
         ) for observation, tool_call in zip(observations, tool_calls)
     ]
 
-    return {"researcher_messages": tool_outputs}
+    return {
+        "researcher_messages": tool_outputs,
+        "tool_call_iterations": state.get("tool_call_iterations", 0) + 1
+    }
 
 def compress_research(state: ResearcherState) -> dict:
     """Compress research findings into a concise summary.
@@ -138,6 +141,12 @@ def should_continue(state: ResearcherState) -> Literal["tool_node", "compress_re
     """
     messages = state["researcher_messages"]
     last_message = messages[-1]
+
+    # Check hard iteration limit to prevent infinite loops (2 by default)
+    max_loops = int(os.getenv("MAX_AGENT_TOOL_LOOPS", "3"))
+    if state.get("tool_call_iterations", 0) >= max_loops:
+        logger.warning(f"Research agent reached max tool call limit ({max_loops}). Forcing to compress_research.")
+        return "compress_research"
 
     # If the LLM makes a tool call, continue to tool execution
     if last_message.tool_calls:
