@@ -323,82 +323,78 @@ CRITICAL REQUIREMENTS:
 
 The cleaned findings will be used for final report generation, so comprehensiveness is critical."""
 
-final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt = """Based on all the research conducted and draft report, create a comprehensive, well-structured answer to the overall research brief:
-<Research Brief>
-{research_brief}
-</Research Brief>
+final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt = """
+You are an expert Deep Research Analyst and meticulous Fact-Checker. 
+Your task is to synthesize research findings, resolve conflicts, and produce a highly insightful, publication-ready report based on a research brief and an initial draft.
 
-CRITICAL: Make sure the answer is written in the same language as the human messages!
+CRITICAL: The final report in Step 4 MUST be written in the same language as the human messages! 
 For example, if the user's messages are in English, then MAKE SURE you write your response in English. If the user's messages are in Chinese, then MAKE SURE you write your entire response in Chinese.
 This is critical. The user will only understand the answer if it is written in the same language as their input message.
 
 Today's date is {date}.
 
-Here are the findings from the research that you conducted:
-<Findings>
-{findings}
-</Findings>
+<Research Brief>
+{research_brief}
+</Research Brief>
 
-Here is the draft report:
 <Draft Report>
 {draft_report}
 </Draft Report>
 
-Please create a detailed answer to the overall research brief that:
-1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
-2. Includes specific facts and insights from the research
-3. References relevant sources using [Title](URL) format
-4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
-5. Includes a "Sources" section at the end with all referenced links
+<Findings>
+{findings}
+</Findings>
 
+=== EXECUTION INSTRUCTIONS ===
+You must process this request in a single response, strictly following these 4 sequential steps. 
+
+### Step 1: Evidence Anchoring (Tagging)
+Scan the <Findings> and identify specific sentences, paragraphs, or data points that are highly relevant to answering the <Research Brief> or addressing points in the <Draft Report>. 
+- Extract these raw snippets and wrap each one in `<evidence>` tags. 
+- Ignore irrelevant noise or fluff in the findings.
+
+### Step 2: Fact Extraction & Alignment
+For each piece of `<evidence>` you tagged in Step 1, extract the core facts into a concise bulleted list. 
+- For each fact, explicitly label its relationship to the <Draft Report> using one of three tags: 
+  - [SUPPORT]: Corroborates a claim in the draft.
+  - [REFUTE]: Contradicts or corrects a claim in the draft.
+  - [SUPPLEMENT]: Adds new, critical information missing from the draft.
+
+### Step 3: Synthesis & Conflict Resolution (Chain-of-Thought)
+Wrap your thinking process in `<reasoning>` tags.
+- Think step-by-step about how to construct the final report. 
+- Address any [REFUTE] facts: How will you correct the draft?
+- Address [SUPPLEMENT] facts: Where is the best place to insert this new information?
+- Plan the overall structure of your final report based on the structural examples provided in Step 4.
+
+### Step 4: Final Report Generation
+Now, write the final detailed answer to the overall research brief based on your reasoning.
+
+[Structure Guidance]
 You can structure your report in a number of different ways. Here are some examples:
+- To compare two things: 1/ intro 2/ overview of topic A 3/ overview of topic B 4/ comparison between A and B 5/ conclusion
+- To return a list: 1/ list of things or table of things (Or make each item a separate section. No intro/conclusion needed for lists).
+- To summarize/overview: 1/ overview of topic 2/ concept 1 3/ concept 2 4/ concept 3 5/ conclusion
+REMEMBER: Section is a VERY fluid and loose concept. You can structure your report however you think is best. Make sure sections are cohesive and make sense for the reader.
 
-To answer a question that asks you to compare two things, you might structure your report like this:
-1/ intro
-2/ overview of topic A
-3/ overview of topic B
-4/ comparison between A and B
-5/ conclusion
-
-To answer a question that asks you to return a list of things, you might only need a single section which is the entire list.
-1/ list of things or table of things
-Or, you could choose to make each item in the list a separate section in the report. When asked for lists, you don't need an introduction or conclusion.
-1/ item 1
-2/ item 2
-3/ item 3
-
-To answer a question that asks you to summarize a topic, give a report, or give an overview, you might structure your report like this:
-1/ overview of topic
-2/ concept 1
-3/ concept 2
-4/ concept 3
-5/ conclusion
-
-If you think you can answer the question with a single section, you can do that too!
-1/ answer
-
-REMEMBER: Section is a VERY fluid and loose concept. You can structure your report however you think is best, including in ways that are not listed above!
-Make sure that your sections are cohesive, and make sense for the reader.
-
+[Writing & Formatting Rules]
 For each section of the report, do the following:
-- Have an explicit discussion in simple, clear language.
-- DO NOT oversimplify. Clarify when a concept is ambiguous.
-- DO NOT list facts in bullet points. write in paragraph form.
+- Have an explicit discussion in simple, clear language. DO NOT oversimplify. Clarify when a concept is ambiguous.
+- DO NOT list facts in bullet points. Write in paragraph form.
 - If there are theoretical frameworks, provide a detailed application of theoretical frameworks.
 - For comparison and conclusion, include a summary table.
-- Use ## for section title (Markdown format) for each section of the report
-- Do NOT ever refer to yourself as the writer of the report. This should be a professional report without any self-referential language. 
-- Do not say what you are doing in the report. Just write the report without any commentary from yourself.
-- Each section should be as long as necessary to deeply answer the question with the information you have gathered. It is expected that sections will be fairly long and verbose. You are writing a deep research report, and users will expect a thorough answer and provide insights by following the Insightfulness Rules.
+- Use ## for section title (Markdown format) for each section. (# for title, ### for subsections).
+- Do NOT ever refer to yourself as the writer of the report. No self-referential language.
+- Do not say what you are doing in the report. Just write it.
+- Each section should be fairly long and verbose. You are writing a deep research report, and users expect a thorough answer.
 
+[Quality Check Rules]
+Ensure your final report strictly adheres to these rules:
 <Insightfulness Rules>
 - Granular breakdown - Does the response have a granular breakdown of the topics and their specific causes and specific impacts?
 - Detailed mapping table - Does the response have a detailed table mapping these causes and effects?
 - Nuanced discussion - Does the response have detailed exploration of the topic and explicit discussion?
 </Insightfulness Rules>
-
-- Each section should follow the Helpfulness Rules.
-
 <Helpfulness Rules>
 - Satisfying user intent – Does the response directly address the user’s request or question?
 - Ease of understanding – Is the response fluent, coherent, and logically structured?
@@ -406,107 +402,18 @@ For each section of the report, do the following:
 - Appropriate language – Is the tone suitable and professional, without unnecessary jargon or confusing phrasing?
 </Helpfulness Rules>
 
-REMEMBER:
-The brief and research may be in English, but you need to translate this information to the right language when writing the final answer.
-Make sure the final answer report is in the SAME language as the human messages in the message history.
-
-Format the report in clear markdown with proper structure and include source references where appropriate.
-
-<Citation Rules>
-- Assign each unique URL a single citation number in your text
-- End with ### Sources that lists each source with corresponding numbers
-- Include the URL in ### Sources section only. Use the citation number in the other sections.
-- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list regardless of which sources you choose
-- Each source should be a separate line item in a list, so that in markdown it is rendered as a list.
+[Citation Rules]
+- Assign each unique URL a single citation number in your text.
+- End with ### Sources that lists each source with corresponding numbers.
+- Include the URL in the ### Sources section only. Use the citation number in the other sections.
+- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list.
+- Each source should be a separate line item.
 - Example format:
   [1] Source Title: URL
   [2] Source Title: URL
-- Citations are extremely important. Make sure to include these, and pay a lot of attention to getting these right. Users will often use these citations to look into more information.
-</Citation Rules>
-"""
+- Citations are extremely important. Pay a lot of attention to getting these right.
 
-report_generation_with_draft_insight_prompt = """Based on all the research conducted and draft report, create a comprehensive, well-structured answer to the overall research brief:
-<Research Brief>
-{research_brief}
-</Research Brief>
-
-CRITICAL: Make sure the answer is written in the same language as the human messages!
-For example, if the user's messages are in English, then MAKE SURE you write your response in English. If the user's messages are in Chinese, then MAKE SURE you write your entire response in Chinese.
-This is critical. The user will only understand the answer if it is written in the same language as their input message.
-
-Today's date is {date}.
-
-Here is the draft report:
-<Draft Report>
-{draft_report}
-</Draft Report>
-
-Here are the findings from the research that you conducted:
-<Findings>
-{findings}
-</Findings>
-
-Please create a detailed answer to the overall research brief that:
-1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
-2. Includes specific facts and insights from the research
-3. References relevant sources using [Title](URL) format
-4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
-5. Includes a "Sources" section at the end with all referenced links
-
-You can structure your report in a number of different ways. Here are some examples:
-
-To answer a question that asks you to compare two things, you might structure your report like this:
-1/ intro
-2/ overview of topic A
-3/ overview of topic B
-4/ comparison between A and B
-5/ conclusion
-
-To answer a question that asks you to return a list of things, you might only need a single section which is the entire list.
-1/ list of things or table of things
-Or, you could choose to make each item in the list a separate section in the report. When asked for lists, you don't need an introduction or conclusion.
-1/ item 1
-2/ item 2
-3/ item 3
-
-To answer a question that asks you to summarize a topic, give a report, or give an overview, you might structure your report like this:
-1/ overview of topic
-2/ concept 1
-3/ concept 2
-4/ concept 3
-5/ conclusion
-
-If you think you can answer the question with a single section, you can do that too!
-1/ answer
-
-REMEMBER: Section is a VERY fluid and loose concept. You can structure your report however you think is best, including in ways that are not listed above!
-Make sure that your sections are cohesive, and make sense for the reader.
-
-For each section of the report, do the following:
-- Use simple, clear language
-- Keep important details from the research findings
-- Use ## for section title (Markdown format) for each section of the report
-- Do NOT ever refer to yourself as the writer of the report. This should be a professional report without any self-referential language. 
-- Do not say what you are doing in the report. Just write the report without any commentary from yourself.
-- Each section should be as long as necessary to deeply answer the question with the information you have gathered. It is expected that sections will be fairly long and verbose. You are writing a deep research report, and users will expect a thorough answer.
-- Use bullet points to list out information when appropriate, but by default, write in paragraph form.
-
-REMEMBER:
-The brief and research may be in English, but you need to translate this information to the right language when writing the final answer.
-Make sure the final answer report is in the SAME language as the human messages in the message history.
-
-Format the report in clear markdown with proper structure and include source references where appropriate.
-
-<Citation Rules>
-- Assign each unique URL a single citation number in your text
-- End with ### Sources that lists each source with corresponding numbers
-- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list regardless of which sources you choose
-- Each source should be a separate line item in a list, so that in markdown it is rendered as a list.
-- Example format:
-  [1] Source Title: URL
-  [2] Source Title: URL
-- Citations are extremely important. Make sure to include these, and pay a lot of attention to getting these right. Users will often use these citations to look into more information.
-</Citation Rules>
+=== BEGIN YOUR RESPONSE ===
 """
 
 draft_report_generation_prompt = """Based on all the research in your knowledge base, create a comprehensive, well-structured answer to the overall research brief:
