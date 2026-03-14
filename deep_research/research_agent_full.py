@@ -16,7 +16,10 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 
 from deep_research.utils import get_today_str
-from deep_research.prompts import final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt
+from deep_research.prompts import (
+    final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt,
+    final_report_generation_basic_denoise_prompt
+)
 from deep_research.state_scope import AgentState, AgentInputState
 from deep_research.research_agent_scope import clarify_with_user, write_research_brief, write_draft_report
 from deep_research.multi_agent_supervisor import supervisor_agent
@@ -49,13 +52,21 @@ async def final_report_generation(state: AgentState):
 
     findings = "\n".join(notes)
 
-    final_report_prompt = final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt.format(
-        research_brief=state.get("research_brief", ""),
-        findings=findings,
-        date=get_today_str(),
-        draft_report=state.get("draft_report", ""),
-        user_request=state.get("user_request", "")
-    )
+    if os.getenv("BASIC_REPORT_DENOISING", "false").lower() == "true":
+        final_report_prompt = final_report_generation_basic_denoise_prompt.format(
+            research_brief=state.get("research_brief", ""),
+            findings=findings,
+            date=get_today_str(),
+            draft_report=state.get("draft_report", "")
+        )
+    else:
+        final_report_prompt = final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt.format(
+            research_brief=state.get("research_brief", ""),
+            findings=findings,
+            date=get_today_str(),
+            draft_report=state.get("draft_report", ""),
+            user_request=state.get("user_request", "")
+        )
 
     final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
 

@@ -13,6 +13,9 @@ from langchain_core.messages import BaseMessage
 from langchain_core.tools import tool
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
+import os
+
+ENABLE_VERIFICATION = os.getenv("ENABLE_VERIFICATION", "true").lower() == "true"
 
 class SupervisorState(TypedDict):
     """
@@ -35,15 +38,23 @@ class SupervisorState(TypedDict):
     # Draft report
     draft_report: str
 
-@tool
-class ConductResearch(BaseModel):
-    """Tool for delegating a research task to a specialized sub-agent."""
-    research_topic: str = Field(
-        description="The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).",
-    )
-    verification_assertions: list[str] = Field(
-        description="A list of strict natural language assertions that the research findings must satisfy to be considered successful (e.g., 'Must contain specific Q3 revenue numbers').",
-    )
+if ENABLE_VERIFICATION:
+    @tool
+    class ConductResearch(BaseModel):
+        """Tool for delegating a research task to a specialized sub-agent."""
+        research_topic: str = Field(
+            description="The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).",
+        )
+        verification_assertions: list[str] = Field(
+            description="A list of strict natural language assertions that the research findings must satisfy to be considered successful (e.g., 'Must contain specific Q3 revenue numbers').",
+        )
+else:
+    @tool
+    class ConductResearch(BaseModel):
+        """Tool for delegating a research task to a specialized sub-agent."""
+        research_topic: str = Field(
+            description="The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).",
+        )
 
 @tool
 class ResearchComplete(BaseModel):

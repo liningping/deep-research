@@ -26,7 +26,10 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from deep_research.prompts import lead_researcher_with_multiple_steps_diffusion_double_check_prompt
+from deep_research.prompts import (
+    lead_researcher_with_multiple_steps_diffusion_double_check_prompt,
+    lead_researcher_prompt
+)
 from deep_research.research_agent import researcher_agent
 from deep_research.state_multi_agent_supervisor import (
     SupervisorState, 
@@ -52,13 +55,17 @@ def get_notes_from_tool_calls(messages: list[BaseMessage]) -> list[str]:
     Returns:
         List of research note strings extracted from ToolMessage objects
     """
-    # Only extract messages that are tool responses for ConductResearch and contain the "PASS" verification
-    # We do not want think_tools or FAILED research attempts polluting our final note state
+    # Only extract messages that are tool responses for ConductResearch
+    # We do not want think_tools or filter calls polluting our final note state
     valid_notes = []
     tool_msgs = filter_messages(messages, include_types="tool")
     for msg in tool_msgs:
-        if msg.name == "ConductResearch" and "FAIL:" not in str(msg.content):
-            valid_notes.append(str(msg.content))
+        if msg.name == "ConductResearch":
+            if os.getenv("ENABLE_VERIFICATION", "true").lower() == "true":
+                if "FAIL:" not in str(msg.content):
+                    valid_notes.append(str(msg.content))
+            else:
+                valid_notes.append(str(msg.content))
     return valid_notes
 
 # Ensure async compatibility for Jupyter environments
@@ -128,11 +135,18 @@ async def supervisor(state: SupervisorState) -> Command[Literal["supervisor_tool
 
     # Prepare system message with current date and constraints
 
-    system_message = lead_researcher_with_multiple_steps_diffusion_double_check_prompt.format(
-        date=get_today_str(), 
-        max_concurrent_research_units=max_concurrent_researchers,
-        max_researcher_iterations=max_researcher_iterations
-    )
+    if os.getenv("ENABLE_VERIFICATION", "true").lower() == "true":
+        system_message = lead_researcher_with_multiple_steps_diffusion_double_check_prompt.format(
+            date=get_today_str(), 
+            max_concurrent_research_units=max_concurrent_researchers,
+            max_researcher_iterations=max_researcher_iterations
+        )
+    else:
+        system_message = lead_researcher_prompt.format(
+            date=get_today_str(), 
+            max_concurrent_research_units=max_concurrent_researchers,
+            max_researcher_iterations=max_researcher_iterations
+        )
     messages = [SystemMessage(content=system_message)] + supervisor_messages
 
     logger.debug(f"supervisor - Number of input messages: {len(messages)}")
@@ -241,24 +255,28 @@ async def supervisor_tools(state: SupervisorState) -> Command[Literal["superviso
                 research_tool_messages = []
                 for result, tool_call in zip(tool_results, conduct_research_calls):
                     raw_findings = result.get("compressed_research", "Error synthesizing research report")
-                    assertions = tool_call["args"].get("verification_assertions", [])
                     
-                    if not assertions:
-                        # Fallback if no assertions provided
-                        final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>PASS: No assertions provided.</verification>"
-                    else:
-                        assertions_str = "\n".join([f"- {a}" for a in assertions])
-                        verification_prompt = f"Evaluate the following research findings against these specific assertions:\n\nAssertions:\n{assertions_str}\n\nFindings:\n{raw_findings}\n\nDo the findings fully satisfy ALL of the assertions? Provide a boolean 'passed' and 'feedback' explaining any missing information."
+                    if os.getenv("ENABLE_VERIFICATION", "true").lower() == "true":
+                        assertions = tool_call["args"].get("verification_assertions", [])
                         
-                        try:
-                            verification_res = await verifier_model.ainvoke([HumanMessage(content=verification_prompt)])
-                            if verification_res.passed:
-                                final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>PASS: All criteria met.</verification>"
-                            else:
-                                final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>FAIL: {verification_res.feedback}\nPlease adjust your search query and retry.</verification>"
-                        except Exception as e:
-                            logger.error(f"Verification failed: {e}")
-                            final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>PASS: Verification step errored out ({e}).</verification>"
+                        if not assertions:
+                            # Fallback if no assertions provided
+                            final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>PASS: No assertions provided.</verification>"
+                        else:
+                            assertions_str = "\n".join([f"- {a}" for a in assertions])
+                            verification_prompt = f"Evaluate the following research findings against these specific assertions:\n\nAssertions:\n{assertions_str}\n\nFindings:\n{raw_findings}\n\nDo the findings fully satisfy ALL of the assertions? Provide a boolean 'passed' and 'feedback' explaining any missing information."
+                            
+                            try:
+                                verification_res = await verifier_model.ainvoke([HumanMessage(content=verification_prompt)])
+                                if verification_res.passed:
+                                    final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>PASS: All criteria met.</verification>"
+                                else:
+                                    final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>FAIL: {verification_res.feedback}\nPlease adjust your search query and retry.</verification>"
+                            except Exception as e:
+                                logger.error(f"Verification failed: {e}")
+                                final_content = f"<findings>\n{raw_findings}\n</findings>\n<verification>PASS: Verification step errored out ({e}).</verification>"
+                    else:
+                        final_content = f"<findings>\n{raw_findings}\n</findings>"
 
                     research_tool_messages.append(
                         ToolMessage(
