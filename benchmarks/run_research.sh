@@ -20,16 +20,39 @@ mkdir -p $LOGS_DIR
 # --input /Users/akshara.prabhakar/Documents/deep_research/benchmarks/deep_research_bench/data/prompt_data/query.jsonl \
 # --output_dir drb_steer_trajectories \
 # --max_concurrent 1 \
-# --task_ids 1 \
-# --collect-traj > $LOGS_DIR/drb_traj_steer1.log 2>&1 &
+# Define the ablation settings to test:
+# format: "ENABLE_VERIFICATION BASIC_REPORT_DENOISING"
+ABLATIONS=(
+  "true true"     # No RAGdenoise: Verification ON, RAGdenoise OFF
+  "false false"   # No Verify: Verification OFF, RAGdenoise ON
+)
 
-python run_research_concurrent.py \
-  --benchmark drb \
-  --max_concurrent 5 \
-  --task_ids 1 \
-  --provider openai \
-  --model qwen3-max \
-  --max_loops 3
+for ablation in "${ABLATIONS[@]}"; do
+  read -r VERIFY DENOISE <<< "$ablation"
+  
+  export ENABLE_VERIFICATION="$VERIFY"
+  export BASIC_REPORT_DENOISING="$DENOISE"
+
+  ABLATION_SUFFIX=""
+  if [[ "$VERIFY" == "false" ]]; then
+    ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_verify"
+  fi
+  if [[ "$DENOISE" == "true" ]]; then
+    ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_RAGdenoise"
+  fi
+
+  echo "Starting run for ablation: VERIFY=$VERIFY, DENOISE=$DENOISE, SUFFIX=$ABLATION_SUFFIX"
+
+  python run_research_concurrent.py \
+    --benchmark drb \
+    --max_concurrent 5 \
+    --provider openai \
+    --model "qwen3-max${ABLATION_SUFFIX}" \
+    --max_loops 3
+
+  # Wait for a short duration between launches if desired, or let them run concurrently
+  # sleep 5
+done
 
 ## DeepConsult
 # python -u run_research_concurrent.py \
