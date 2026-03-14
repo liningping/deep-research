@@ -26,7 +26,6 @@ mkdir -p $LOGS_DIR
 python run_research_concurrent.py \
   --benchmark drb \
   --max_concurrent 5 \
-  --task_ids 1 \
   --provider openai \
   --model qwen3-max \
   --max_loops 3

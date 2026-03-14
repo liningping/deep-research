@@ -1,6 +1,6 @@
 #!/bin/bash
 # Target model name list
-TARGET_MODELS=("edr_qwen3-max")
+TARGET_MODELS=("our_qwen3-max")
 # Common parameters for both RACE and Citation evaluations
 RAW_DATA_DIR="data/test_data/raw_data"
 OUTPUT_DIR="results"
