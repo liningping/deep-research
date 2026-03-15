@@ -21,24 +21,24 @@ mkdir -p $LOGS_DIR
 # --output_dir drb_steer_trajectories \
 # --max_concurrent 1 \
 # Define the ablation settings to test:
-# format: "ENABLE_VERIFICATION BASIC_REPORT_DENOISING"
+# format: "ENABLE_VERIFICATION DISABLE_REPORT_DENOISING"
 ABLATIONS=(
-  "true true"     # No RAGdenoise: Verification ON, RAGdenoise OFF
-  "false false"   # No Verify: Verification OFF, RAGdenoise ON
+  "false true"    # No denoise
+  # "true false"    # No Verify
 )
 
 for ablation in "${ABLATIONS[@]}"; do
   read -r VERIFY DENOISE <<< "$ablation"
   
-  export ENABLE_VERIFICATION="$VERIFY"
-  export BASIC_REPORT_DENOISING="$DENOISE"
+  export DISABLE_VERIFICATION="$VERIFY"
+  export DISABLE_REPORT_DENOISING="$DENOISE"
 
   ABLATION_SUFFIX=""
-  if [[ "$VERIFY" == "false" ]]; then
+  if [[ "$VERIFY" == "true" ]]; then
     ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_verify"
   fi
   if [[ "$DENOISE" == "true" ]]; then
-    ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_RAGdenoise"
+    ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_denoise"
   fi
 
   echo "Starting run for ablation: VERIFY=$VERIFY, DENOISE=$DENOISE, SUFFIX=$ABLATION_SUFFIX"

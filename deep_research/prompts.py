@@ -382,13 +382,9 @@ CRITICAL REQUIREMENTS:
 
 The cleaned findings will be used for final report generation, so comprehensiveness is critical."""
 
-final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt = """
+final_report_generation_step1_prompt = """
 You are an expert Deep Research Analyst and meticulous Fact-Checker. 
-Your task is to synthesize research findings, resolve conflicts, and produce a highly insightful, publication-ready report based on a research brief and an initial draft.
-
-CRITICAL: The final report in Step 4 MUST be written in the same language as the human messages! 
-For example, if the user's messages are in English, then MAKE SURE you write your response in English. If the user's messages are in Chinese, then MAKE SURE you write your entire response in Chinese.
-This is critical. The user will only understand the answer if it is written in the same language as their input message.
+Your task is to analyze research findings against a research brief and an initial draft, extracting evidence and synthesizing a plan for the final report.
 
 Today's date is {date}.
 
@@ -405,7 +401,7 @@ Today's date is {date}.
 </Findings>
 
 === EXECUTION INSTRUCTIONS ===
-You must process this request in a single response, strictly following these 4 sequential steps. 
+You must process this request in a single response, strictly following these 3 sequential steps. 
 
 ### Step 1: Evidence Anchoring (Tagging)
 Scan the <Findings> and identify specific sentences, paragraphs, or data points that are highly relevant to answering the <Research Brief> or addressing points in the <Draft Report>. 
@@ -424,60 +420,14 @@ Wrap your thinking process in `<reasoning>` tags.
 - Think step-by-step about how to construct the final report. 
 - Address any [REFUTE] facts: How will you correct the draft?
 - Address [SUPPLEMENT] facts: Where is the best place to insert this new information?
-- Plan the overall structure of your final report based on the structural examples provided in Step 4.
-
-### Step 4: Final Report Generation
-Now, write the final detailed answer to the overall research brief based on your reasoning.
-
-[Structure Guidance]
-You can structure your report in a number of different ways. Here are some examples:
-- To compare two things: 1/ intro 2/ overview of topic A 3/ overview of topic B 4/ comparison between A and B 5/ conclusion
-- To return a list: 1/ list of things or table of things (Or make each item a separate section. No intro/conclusion needed for lists).
-- To summarize/overview: 1/ overview of topic 2/ concept 1 3/ concept 2 4/ concept 3 5/ conclusion
-REMEMBER: Section is a VERY fluid and loose concept. You can structure your report however you think is best. Make sure sections are cohesive and make sense for the reader.
-
-[Writing & Formatting Rules]
-For each section of the report, do the following:
-- Have an explicit discussion in simple, clear language. DO NOT oversimplify. Clarify when a concept is ambiguous.
-- DO NOT list facts in bullet points. Write in paragraph form.
-- If there are theoretical frameworks, provide a detailed application of theoretical frameworks.
-- For comparison and conclusion, include a summary table.
-- Use ## for section title (Markdown format) for each section. (# for title, ### for subsections).
-- Do NOT ever refer to yourself as the writer of the report. No self-referential language.
-- Do not say what you are doing in the report. Just write it.
-- Each section should be fairly long and verbose. You are writing a deep research report, and users expect a thorough answer.
-
-[Quality Check Rules]
-Ensure your final report strictly adheres to these rules:
-<Insightfulness Rules>
-- Granular breakdown - Does the response have a granular breakdown of the topics and their specific causes and specific impacts?
-- Detailed mapping table - Does the response have a detailed table mapping these causes and effects?
-- Nuanced discussion - Does the response have detailed exploration of the topic and explicit discussion?
-</Insightfulness Rules>
-<Helpfulness Rules>
-- Satisfying user intent – Does the response directly address the user’s request or question?
-- Ease of understanding – Is the response fluent, coherent, and logically structured?
-- Accuracy – Are the facts, reasoning, and explanations correct?
-- Appropriate language – Is the tone suitable and professional, without unnecessary jargon or confusing phrasing?
-</Helpfulness Rules>
-
-[Citation Rules]
-- Assign each unique URL a single citation number in your text.
-- End with ### Sources that lists each source with corresponding numbers.
-- Include the URL in the ### Sources section only. Use the citation number in the other sections.
-- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list.
-- Each source should be a separate line item.
-- Example format:
-  [1] Source Title: URL
-  [2] Source Title: URL
-- Citations are extremely important. Pay a lot of attention to getting these right.
+- Plan the overall structure of the final report.
 
 === BEGIN YOUR RESPONSE ===
 """
 
-final_report_generation_basic_denoise_prompt = """
-You are an expert Deep Research Analyst and meticulous Fact-Checker. 
-Your task is to synthesize research findings, resolve conflicts, and produce a highly insightful, publication-ready report based on a research brief and an initial draft.
+final_report_generation_step2_prompt = """
+You are an expert Deep Research Analyst and meticulous Report Writer. 
+Your task is to write a highly insightful, publication-ready final report based on a research brief, an initial draft, and research findings or synthesis.
 
 CRITICAL: The final report MUST be written in the same language as the human messages! 
 For example, if the user's messages are in English, then MAKE SURE you write your response in English. If the user's messages are in Chinese, then MAKE SURE you write your entire response in Chinese.
@@ -493,22 +443,12 @@ Today's date is {date}.
 {draft_report}
 </Draft Report>
 
-<Findings>
-{findings}
-</Findings>
+<Fact-Checking Synthesis or Raw Findings>
+{synthesis_or_findings}
+</Fact-Checking Synthesis or Raw Findings>
 
 === EXECUTION INSTRUCTIONS ===
-You must process this request in a single response, strictly following these steps to denoise the draft report using findings:
-
-### Step 1: Synthesis & Conflict Resolution (Chain-of-Thought)
-Wrap your thinking process in `<reasoning>` tags.
-- Think step-by-step about how to update the draft report and integrate the newly discovered findings. 
-- Address any contradictions: How will you correct the draft based on the findings?
-- Address new information: Where is the best place to insert this new information?
-- Plan the overall structure of your final report based on the structural examples provided below.
-
-### Step 2: Final Report Generation
-Now, write the final detailed answer to the overall research brief based on your reasoning.
+Based on the <Fact-Checking Synthesis or Raw Findings> provided above, write the final detailed answer to the overall research brief.
 
 [Structure Guidance]
 You can structure your report in a number of different ways. Here are some examples:
