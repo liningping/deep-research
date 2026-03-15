@@ -27,32 +27,12 @@ ABLATIONS=(
   "false false"   # No Verify: Verification OFF, RAGdenoise ON
 )
 
-for ablation in "${ABLATIONS[@]}"; do
-  read -r VERIFY DENOISE <<< "$ablation"
-  
-  export ENABLE_VERIFICATION="$VERIFY"
-  export BASIC_REPORT_DENOISING="$DENOISE"
-
-  ABLATION_SUFFIX=""
-  if [[ "$VERIFY" == "false" ]]; then
-    ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_verify"
-  fi
-  if [[ "$DENOISE" == "true" ]]; then
-    ABLATION_SUFFIX="${ABLATION_SUFFIX}_wo_RAGdenoise"
-  fi
-
-  echo "Starting run for ablation: VERIFY=$VERIFY, DENOISE=$DENOISE, SUFFIX=$ABLATION_SUFFIX"
-
-  python run_research_concurrent.py \
-    --benchmark drb \
-    --max_concurrent 5 \
-    --provider openai \
-    --model "qwen3-max${ABLATION_SUFFIX}" \
-    --max_loops 3
-
-  # Wait for a short duration between launches if desired, or let them run concurrently
-  # sleep 5
-done
+python run_research_concurrent.py \
+  --benchmark drb \
+  --max_concurrent 5 \
+  --provider openai \
+  --model qwen3-max \
+  --max_loops 3
 
 ## DeepConsult
 # python -u run_research_concurrent.py \
