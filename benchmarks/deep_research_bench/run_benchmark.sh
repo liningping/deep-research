@@ -1,6 +1,6 @@
 #!/bin/bash
 # Target model name list
-TARGET_MODELS=("edr_qwen3-max_wo_verify" "edr_qwen3-max_wo_RAGdenoise")
+TARGET_MODELS=("edr_qwen3-max_0316")
 # Common parameters for both RACE and Citation evaluations
 RAW_DATA_DIR="data/test_data/raw_data"
 OUTPUT_DIR="results"

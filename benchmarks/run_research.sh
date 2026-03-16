@@ -23,7 +23,8 @@ mkdir -p $LOGS_DIR
 # Define the ablation settings to test:
 # format: "ENABLE_VERIFICATION DISABLE_REPORT_DENOISING"
 ABLATIONS=(
-  "false true"    # No denoise
+    "false false"   # full agent
+  # "false true"    # No denoise
   # "true false"    # No Verify
 )
 
