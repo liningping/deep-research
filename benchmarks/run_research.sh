@@ -20,13 +20,16 @@ mkdir -p $LOGS_DIR
 # --input /Users/akshara.prabhakar/Documents/deep_research/benchmarks/deep_research_bench/data/prompt_data/query.jsonl \
 # --output_dir drb_steer_trajectories \
 # --max_concurrent 1 \
-# --task_ids 1 \
-# --collect-traj > $LOGS_DIR/drb_traj_steer1.log 2>&1 &
+# Define the ablation settings to test:
+# format: "ENABLE_VERIFICATION BASIC_REPORT_DENOISING"
+ABLATIONS=(
+  "true true"     # No RAGdenoise: Verification ON, RAGdenoise OFF
+  "false false"   # No Verify: Verification OFF, RAGdenoise ON
+)
 
 python run_research_concurrent.py \
   --benchmark drb \
   --max_concurrent 5 \
-  --task_ids 2 \
   --provider openai \
   --model qwen3-max \
   --max_loops 3

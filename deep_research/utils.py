@@ -16,7 +16,7 @@ from langchain_core.tools import tool, InjectedToolArg
 from tavily import TavilyClient
 
 from deep_research.state_research import Summary
-from deep_research.prompts import summarize_webpage_prompt, report_generation_with_draft_insight_prompt
+from deep_research.prompts import summarize_webpage_prompt
 
 # ===== LOGGING CONFIGURATION =====
 import logging
@@ -284,30 +284,30 @@ def think_tool(reflection: str) -> str:
     """
     return f"Reflection recorded: {reflection}"
 
-@tool(parse_docstring=True)
-def refine_draft_report(research_brief: Annotated[str, InjectedToolArg], 
-                        findings: Annotated[str, InjectedToolArg], 
-                        draft_report: Annotated[str, InjectedToolArg]):
-    """Refine draft report
+# @tool(parse_docstring=True)
+# def refine_draft_report(research_brief: Annotated[str, InjectedToolArg], 
+#                         findings: Annotated[str, InjectedToolArg], 
+#                         draft_report: Annotated[str, InjectedToolArg]):
+#     """Refine draft report
 
-    Synthesizes all research findings into a comprehensive draft report
+#     Synthesizes all research findings into a comprehensive draft report
 
-    Args:
-        research_brief: user's research request
-        findings: collected research findings for the user request
-        draft_report: draft report based on the findings and user request
+#     Args:
+#         research_brief: user's research request
+#         findings: collected research findings for the user request
+#         draft_report: draft report based on the findings and user request
 
-    Returns:
-        refined draft report
-    """
+#     Returns:
+#         refined draft report
+#     """
 
-    draft_report_prompt = report_generation_with_draft_insight_prompt.format(
-        research_brief=research_brief,
-        findings=findings,
-        draft_report=draft_report,
-        date=get_today_str()
-    )
+#     draft_report_prompt = report_generation_with_draft_insight_prompt.format(
+#         research_brief=research_brief,
+#         findings=findings,
+#         draft_report=draft_report,
+#         date=get_today_str()
+#     )
 
-    draft_report = writer_model.invoke([HumanMessage(content=draft_report_prompt)])
+#     draft_report = writer_model.invoke([HumanMessage(content=draft_report_prompt)])
 
-    return draft_report.content
+#     return draft_report.content
