@@ -17,8 +17,8 @@ from langgraph.graph import StateGraph, START, END
 
 from deep_research.utils import get_today_str
 from deep_research.prompts import (
-    final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt,
-    final_report_generation_basic_denoise_prompt
+    final_report_generation_step1_prompt,
+    final_report_generation_step2_prompt
 )
 from deep_research.state_scope import AgentState, AgentInputState
 from deep_research.research_agent_scope import clarify_with_user, write_research_brief, write_draft_report
@@ -52,23 +52,34 @@ async def final_report_generation(state: AgentState):
 
     findings = "\n".join(notes)
 
-    if os.getenv("BASIC_REPORT_DENOISING", "false").lower() == "true":
-        final_report_prompt = final_report_generation_basic_denoise_prompt.format(
+    if os.getenv("DISABLE_REPORT_DENOISING", "false").lower() == "true":
+        # Ablation baseline: Directly pass findings without Synthesis (Step 1)
+        writer_prompt = final_report_generation_step2_prompt.format(
+            research_brief=state.get("research_brief", ""),
+            synthesis_or_findings=findings,
+            date=get_today_str(),
+            draft_report=state.get("draft_report", "")
+        )
+        final_report = await writer_model.ainvoke([HumanMessage(content=writer_prompt)])
+    else:
+        # Phase 1: Analysis & Synthesis (Evidence Extraction & Conflict Resolution)
+        step1_prompt = final_report_generation_step1_prompt.format(
             research_brief=state.get("research_brief", ""),
             findings=findings,
             date=get_today_str(),
             draft_report=state.get("draft_report", "")
         )
-    else:
-        final_report_prompt = final_report_generation_with_helpfulness_insightfulness_hit_citation_prompt.format(
+        step1_response = await writer_model.ainvoke([HumanMessage(content=step1_prompt)])
+        synthesis = step1_response.content
+        
+        # Phase 2: Final Report Generation
+        step2_prompt = final_report_generation_step2_prompt.format(
             research_brief=state.get("research_brief", ""),
-            findings=findings,
+            synthesis_or_findings=synthesis,
             date=get_today_str(),
-            draft_report=state.get("draft_report", ""),
-            user_request=state.get("user_request", "")
+            draft_report=state.get("draft_report", "")
         )
-
-    final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
+        final_report = await writer_model.ainvoke([HumanMessage(content=step2_prompt)])
 
     return {
         "final_report": final_report.content, 

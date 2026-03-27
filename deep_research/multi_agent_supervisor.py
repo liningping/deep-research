@@ -61,7 +61,7 @@ def get_notes_from_tool_calls(messages: list[BaseMessage]) -> list[str]:
     tool_msgs = filter_messages(messages, include_types="tool")
     for msg in tool_msgs:
         if msg.name == "ConductResearch":
-            if os.getenv("ENABLE_VERIFICATION", "true").lower() == "true":
+            if not (os.getenv("DISABLE_VERIFICATION", "false").lower() == "true"):
                 if "FAIL:" not in str(msg.content):
                     valid_notes.append(str(msg.content))
             else:
@@ -135,7 +135,7 @@ async def supervisor(state: SupervisorState) -> Command[Literal["supervisor_tool
 
     # Prepare system message with current date and constraints
 
-    if os.getenv("ENABLE_VERIFICATION", "true").lower() == "true":
+    if not (os.getenv("DISABLE_VERIFICATION", "false").lower() == "true"):
         system_message = lead_researcher_with_multiple_steps_diffusion_double_check_prompt.format(
             date=get_today_str(), 
             max_concurrent_research_units=max_concurrent_researchers,
@@ -256,7 +256,7 @@ async def supervisor_tools(state: SupervisorState) -> Command[Literal["superviso
                 for result, tool_call in zip(tool_results, conduct_research_calls):
                     raw_findings = result.get("compressed_research", "Error synthesizing research report")
                     
-                    if os.getenv("ENABLE_VERIFICATION", "true").lower() == "true":
+                    if not (os.getenv("DISABLE_VERIFICATION", "false").lower() == "true"):
                         assertions = tool_call["args"].get("verification_assertions", [])
                         
                         if not assertions:

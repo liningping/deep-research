@@ -15,7 +15,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 import os
 
-ENABLE_VERIFICATION = os.getenv("ENABLE_VERIFICATION", "true").lower() == "true"
+DISABLE_VERIFICATION = os.getenv("DISABLE_VERIFICATION", "false").lower() == "true"
 
 class SupervisorState(TypedDict):
     """
@@ -38,7 +38,7 @@ class SupervisorState(TypedDict):
     # Draft report
     draft_report: str
 
-if ENABLE_VERIFICATION:
+if not DISABLE_VERIFICATION:
     @tool
     class ConductResearch(BaseModel):
         """Tool for delegating a research task to a specialized sub-agent."""
