@@ -17,8 +17,12 @@
 #    MODE=pairs CUSTOM_PAIRS="1:3 2:3 3:5 5:1" bash benchmarks/run_loop_ablation.sh
 #    绘图时同上 MODE=pairs（SKIP_RUN=1 重绘时也要 MODE=pairs）
 #
-# 仅汇总/出图（已有输出目录时）:
+# 仅汇总/出图（已有 manifest）:
 #   SKIP_RUN=1 bash benchmarks/run_loop_ablation.sh
+#
+# 仅评测（生成已做完：刷新 JSONL + 可选 RACE + 重写 manifest + 出图；勿与 SKIP_RUN=1 同开）:
+#   EVAL_ONLY=1 RUN_RACE=1 bash benchmarks/run_loop_ablation.sh
+#   （与当初相同的 MODE / VALUES / BASELINE_* / CUSTOM_PAIRS / ABLATION_ROOT）
 #
 set -euo pipefail
 
@@ -27,7 +31,7 @@ cd "$ROOT/benchmarks"
 
 # ---------- 可改参数 ----------
 MODE="${MODE:-sweep_agent}"          # sweep_agent | sweep_web | grid | pairs
-VALUES="${VALUES:-5}"        # 空格分隔；可改成子集如 "2 4"
+VALUES="${VALUES:-4 5}"        # 空格分隔；可改成子集如 "2 4"
 CUSTOM_PAIRS="${CUSTOM_PAIRS:-}"     # MODE=pairs 时用，如 "1:3 2:4"
 BASELINE_ATL="${BASELINE_ATL:-3}"    # 扫 WRL 时固定的 ATL
 BASELINE_WRL="${BASELINE_WRL:-3}"    # 扫 ATL 时固定的 WRL
@@ -39,6 +43,7 @@ LIMIT="${LIMIT:-20}"                   # 例如 LIMIT=5 做快速试跑
 TASK_IDS="${TASK_IDS:-}"             # 例如 TASK_IDS=1,2,3
 
 SKIP_RUN="${SKIP_RUN:-0}"
+EVAL_ONLY="${EVAL_ONLY:-0}"
 # 默认跳过 RACE（离线/无外网）；要跑评测：RUN_RACE=1
 SKIP_RACE="${SKIP_RACE:-1}"
 RUN_RACE="${RUN_RACE:-0}"
@@ -51,6 +56,10 @@ ABLATION_ROOT="${ABLATION_ROOT:-$ROOT/benchmarks/ablation_loop_runs}"
 MANIFEST="${MANIFEST:-$ABLATION_ROOT/manifest.jsonl}"
 
 mkdir -p "$ABLATION_ROOT"
+
+if [[ "$SKIP_RUN" == "1" && "$EVAL_ONLY" == "1" ]]; then
+  echo "提示: SKIP_RUN=1 时仅绘图，已忽略 EVAL_ONLY=1。" >&2
+fi
 
 if [[ "$SKIP_RUN" == "1" ]]; then
   echo "SKIP_RUN=1：不跑 benchmark/RACE，仅根据已有 manifest 绘图。"
@@ -67,50 +76,13 @@ if [[ "$SKIP_RUN" == "1" ]]; then
   exit 0
 fi
 
-run_one() {
-  local atl="$1"
-  local wrl="$2"
-  local tag="atl${atl}_wrl${wrl}"
-  local out="$ABLATION_ROOT/$tag"
-
-  mkdir -p "$out"
-
-  export MAX_AGENT_TOOL_LOOPS="$atl"
-
-  # 每组固定记录：与每条 JSON 内 metadata.loop_limits 互证
-  python - "$out" "$atl" "$wrl" "$MODEL" "$PROVIDER" <<'PY'
-import json, sys, datetime
-out, atl, wrl, model, provider = sys.argv[1:6]
-cfg = {
-    "tag": f"atl{atl}_wrl{wrl}",
-    "max_agent_tool_loops": int(atl),
-    "max_web_research_loops": int(wrl),
-    "model": model,
-    "provider": provider,
-    "benchmark": "drb",
-    "written_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    "note": "run_research_concurrent 将本组上限写入 LangGraph config.configurable（max_web_research_loops / max_agent_tool_loops），不依赖全局 os.environ，避免被其它路径污染。shell export 的 MAX_AGENT_TOOL_LOOPS 仅在任务入口被读取一次并写入 configurable。",
-}
-open(f"{out}/run_config.json", "w", encoding="utf-8").write(
-    json.dumps(cfg, ensure_ascii=False, indent=2) + "\n"
-)
-PY
-
-  local extra=()
-  [[ -n "$LIMIT" ]] && extra+=(--limit "$LIMIT")
-  [[ -n "$TASK_IDS" ]] && extra+=(--task_ids "$TASK_IDS")
-
-  local model_name="ablation_${tag}"
-  echo "========== Run: MAX_AGENT_TOOL_LOOPS=$atl  --max_loops=$wrl  -> $out =========="
-  python -u run_research_concurrent.py \
-    --benchmark drb \
-    --output_dir "$out" \
-    --provider "$PROVIDER" \
-    --model "$MODEL" \
-    --max_concurrent "$MAX_CONCURRENT" \
-    --max_loops "$wrl" \
-    --drb-jsonl-name "$model_name" \
-    "${extra[@]}"
+# 每组：可选 RACE，再追加 manifest 一行
+finish_group_eval() {
+  local out="$1"
+  local tag="$2"
+  local atl="$3"
+  local wrl="$4"
+  local model_name="$5"
 
   if [[ "$SKIP_RACE" == "1" ]]; then
     python -u "$ROOT/benchmarks/plot_loop_ablation.py" summarize \
@@ -142,6 +114,65 @@ PY
     --model-name "$model_name" \
     --race-overall "${overall:-}" \
     --manifest "$MANIFEST"
+}
+
+run_one() {
+  local atl="$1"
+  local wrl="$2"
+  local tag="atl${atl}_wrl${wrl}"
+  local out="$ABLATION_ROOT/$tag"
+  local model_name="ablation_${tag}"
+
+  mkdir -p "$out"
+
+  if [[ "$EVAL_ONLY" == "1" ]]; then
+    if [[ ! -d "$out" ]]; then
+      echo "错误: EVAL_ONLY=1 但目录不存在: $out" >&2
+      exit 1
+    fi
+    echo "========== EVAL_ONLY: process_drb + 评测 -> $out =========="
+    python -u process_drb.py --input-dir "$out" --model-name "$model_name"
+    finish_group_eval "$out" "$tag" "$atl" "$wrl" "$model_name"
+    return 0
+  fi
+
+  export MAX_AGENT_TOOL_LOOPS="$atl"
+
+  # 每组固定记录：与每条 JSON 内 metadata.loop_limits 互证
+  python - "$out" "$atl" "$wrl" "$MODEL" "$PROVIDER" <<'PY'
+import json, sys, datetime
+out, atl, wrl, model, provider = sys.argv[1:6]
+cfg = {
+    "tag": f"atl{atl}_wrl{wrl}",
+    "max_agent_tool_loops": int(atl),
+    "max_web_research_loops": int(wrl),
+    "model": model,
+    "provider": provider,
+    "benchmark": "drb",
+    "written_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "note": "run_research_concurrent 将本组上限写入 LangGraph config.configurable（max_web_research_loops / max_agent_tool_loops），不依赖全局 os.environ，避免被其它路径污染。shell export 的 MAX_AGENT_TOOL_LOOPS 仅在任务入口被读取一次并写入 configurable。",
+}
+open(f"{out}/run_config.json", "w", encoding="utf-8").write(
+    json.dumps(cfg, ensure_ascii=False, indent=2) + "\n"
+)
+PY
+
+  local extra=()
+  [[ -n "$LIMIT" ]] && extra+=(--limit "$LIMIT")
+  [[ -n "$TASK_IDS" ]] && extra+=(--task_ids "$TASK_IDS")
+
+  echo "========== Run: MAX_AGENT_TOOL_LOOPS=$atl  --max_loops=$wrl  -> $out =========="
+  python -u run_research_concurrent.py \
+    --benchmark drb \
+    --output_dir "$out" \
+    --provider "$PROVIDER" \
+    --model "$MODEL" \
+    --max_concurrent "$MAX_CONCURRENT" \
+    --max_loops "$wrl" \
+    --drb-jsonl-name "$model_name" \
+    "${extra[@]}"
+
+  finish_group_eval "$out" "$tag" "$atl" "$wrl" "$model_name"
 }
 
 if [[ "$SKIP_RUN" == "0" ]]; then

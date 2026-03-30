@@ -89,12 +89,14 @@ class ArticleCleaner:
         for i, chunk in enumerate(chunks):
             try:
                 clean_result = self._clean_text(chunk, language)
-                
-                # If returns None, indicates token limit error
-                if clean_result is None and len(chunk) > 200000:
-                    logger.error(f"Chunk {i+1} too large, cannot process")
+                if clean_result is None:
+                    if len(chunk) > 200000:
+                        logger.error(f"Chunk {i+1} too large, cannot process")
+                    else:
+                        logger.error(
+                            f"Chunk {i+1}/2 cleaning failed (API error or empty/short response)"
+                        )
                     return None
-                
                 cleaned_chunks.append(clean_result)
                 
             except Exception as e:

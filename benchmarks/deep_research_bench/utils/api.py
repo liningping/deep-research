@@ -126,7 +126,10 @@ class AIClient:
                 {"role": "user", "content": user_prompt},
             ],
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if content is None:
+            raise RuntimeError("OpenAI-compatible API returned empty message content")
+        return content
 
     def _generate_google_genai(
         self, user_prompt: str, system_prompt: str, model_to_use: str
