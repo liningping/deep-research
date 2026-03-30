@@ -37,7 +37,7 @@ model = init_chat_model(
     model=os.getenv("DEFAULT_MODEL", "openai:gpt-5"),
     model_provider=os.getenv("LLM_PROVIDER", "openai"),
     base_url=os.getenv("OPENAI_BASE_URL"),
-    api_key=os.getenv("OPENAI_API_KEY"),
+    # api_key=os.getenv("OPENAI_API_KEY"),
     timeout=300
 
 )
@@ -45,7 +45,7 @@ creative_model = init_chat_model(
     model=os.getenv("CREATIVE_MODEL", "openai:gpt-5"),
     model_provider=os.getenv("LLM_PROVIDER", "openai"),
     base_url=os.getenv("OPENAI_BASE_URL"),
-    api_key=os.getenv("OPENAI_API_KEY"),
+    # api_key=os.getenv("OPENAI_API_KEY"),
     timeout=300
 )
 

@@ -48,6 +48,21 @@ GLOBAL_STATS = {
     "tasks_in_progress": 0,
 }
 
+P = """
+You are an expert research analyst. Given a research question, produce a comprehensive, well-structured research report.
+
+Requirements:
+- Use clear sections and subsections with markdown headers
+- Include relevant data, statistics, and facts
+- Use numbered inline citations throughout the text (e.g., [1], [2], [3]) to attribute claims, data, and quotes to specific sources
+- At the end of the report, include a "Sources" or "References" section listing all cited sources in numbered order, with title, author/publisher, year, and URL where available
+- Every factual claim, statistic, or data point MUST have a corresponding numbered citation
+- Use tables or comparison charts for quantitative comparisons
+- Provide analysis and insights, not just information
+- Write in a professional, academic tone
+- The report should be thorough (2000-4000 words)
+"""
+
 
 # ==================== Trajectory Recorder ====================
 class ResearchTrajectoryRecorder:
@@ -969,6 +984,134 @@ async def run_single_research_task_with_trajectory(
         return False, {}, error_msg
 
 
+async def run_single_direct_generation_task(
+    task_data: Dict,
+    dataset_manager: BenchmarkDatasetManager,
+    output_dir: str,
+    provider: str,
+    model: str,
+    task_manager=None,
+    **kwargs,
+) -> Tuple[bool, Dict, str]:
+    """
+    Run a single generation task via direct API call, bypassing the research graph.
+    """
+    from openai import AsyncOpenAI
+    
+    task_id = task_data.get("id", task_data.get("index", "unknown"))
+    query_field = dataset_manager.get_query_field()
+    query = task_data[query_field]
+
+    if isinstance(query, list):
+        query = " ".join(str(item) for item in query)
+    elif not isinstance(query, str):
+        query = str(query)
+
+    original_query = query
+    task_start_time = datetime.now()
+
+    if task_manager:
+        await task_manager.rate_limit()
+
+    logger.info(f"[Task {task_id}] Starting direct API generation (Model: {model})...")
+
+    with STATS_LOCK:
+        GLOBAL_STATS["tasks_started"] += 1
+        GLOBAL_STATS["tasks_in_progress"] += 1
+
+    try:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("OPENAI_BASE_URL")
+        
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=300.0, max_retries=5)
+        graph_start_time = datetime.now()
+        
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": P},
+                {"role": "user", "content": query}
+            ],
+            temperature=0.7,
+            max_tokens=4096,
+            extra_body={'enable_search':True}
+        )
+        
+        final_content = response.choices[0].message.content
+        
+        graph_end_time = datetime.now()
+        graph_duration = graph_end_time - graph_start_time
+        task_end_time = datetime.now()
+        total_duration = task_end_time - task_start_time
+
+        result_data = {
+            "id": task_id,
+            "query": original_query,
+            "article": final_content,
+            "summary": final_content,
+            "timing": {
+                "start_time": task_start_time.isoformat(),
+                "end_time": task_end_time.isoformat(),
+                "total_duration_seconds": total_duration.total_seconds(),
+                "graph_execution_seconds": graph_duration.total_seconds(),
+            },
+            "debug_info": {
+                "research_loops": 0,
+                "sources_gathered": 0,
+                "knowledge_gap": "",
+                "selected_search_tool": "none",
+                "research_complete": True,
+            },
+            "content_stats": {
+                "final_content_length": len(final_content.split()),
+                "final_summary_length": len(final_content.split()),
+            },
+        }
+
+        # Format and save result
+        formatted_result = dataset_manager.format_result(task_data, result_data)
+        output_filename = dataset_manager.get_output_filename(str(task_id))
+        output_file = os.path.join(output_dir, output_filename)
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(formatted_result, f, indent=2, ensure_ascii=False)
+
+        save_md = kwargs.get("save_md", False)
+        if save_md:
+            md_filename = Path(output_filename).stem + ".md"
+            md_file = os.path.join(output_dir, md_filename)
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(final_content)
+            logger.info(f"[Task {task_id}] Markdown saved to: {md_file}")
+
+        logger.info(f"[Task {task_id}] ✅ Completed successfully (Direct API)")
+
+        with STATS_LOCK:
+            GLOBAL_STATS["completed"] += 1
+            GLOBAL_STATS["tasks_in_progress"] -= 1
+
+        return True, formatted_result, ""
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[Task {task_id}] ❌ Failed: {error_msg}")
+
+        with STATS_LOCK:
+            GLOBAL_STATS["failed"] += 1
+            GLOBAL_STATS["tasks_in_progress"] -= 1
+
+        error_data = {
+            "id": task_id,
+            "query": query,
+            "error": error_msg,
+            "timestamp": datetime.now().isoformat(),
+        }
+        error_file = os.path.join(output_dir, f"error_{task_id}.json")
+        with open(error_file, "w", encoding="utf-8") as f:
+            json.dump(error_data, f, indent=2, ensure_ascii=False)
+
+        return False, {}, error_msg
+
+
 class ConcurrentTaskManager:
     """Manages concurrent task execution with rate limiting."""
 
@@ -1050,9 +1193,12 @@ async def process_tasks_concurrently(
     try:
         # Create task coroutines
         logger.info(f"Creating coroutines for {len(tasks)} tasks...")
-        coroutines = [
-            task_manager.run_task(
-                run_single_research_task_with_trajectory(
+        
+        direct_generation = kwargs.get("direct_generation", False)
+        coroutines = []
+        for task in tasks:
+            if direct_generation:
+                coro = run_single_direct_generation_task(
                     task_data=task,
                     dataset_manager=dataset_manager,
                     output_dir=output_dir,
@@ -1061,9 +1207,18 @@ async def process_tasks_concurrently(
                     task_manager=task_manager,
                     **kwargs,
                 )
-            )
-            for task in tasks
-        ]
+            else:
+                coro = run_single_research_task_with_trajectory(
+                    task_data=task,
+                    dataset_manager=dataset_manager,
+                    output_dir=output_dir,
+                    provider=provider,
+                    model=model,
+                    task_manager=task_manager,
+                    **kwargs,
+                )
+            coroutines.append(task_manager.run_task(coro))
+            
         logger.info(f"Created {len(coroutines)} coroutines, executing...")
 
         # Execute all tasks
@@ -1233,6 +1388,11 @@ def main():
         action="store_true",
         help="Save markdown report as .md file immediately after generation",
     )
+    parser.add_argument(
+        "--direct_generation",
+        action="store_true",
+        help="Use direct API generation instead of full research graph",
+    )
 
     args = parser.parse_args()
 
@@ -1349,6 +1509,7 @@ def main():
                 visualization_disabled=True,
                 collect_trajectory=args.collect_traj,
                 save_md=args.save_md,
+                direct_generation=args.direct_generation,
             )
         )
         logger.info(

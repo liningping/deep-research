@@ -93,7 +93,7 @@ python run_research_concurrent.py \
 ```bash
 python process_drb.py \
   --input-dir deep_research_bench/results/edr_reports_qwen3-max \
-  --model-name edr_qwen3-max
+  --model-name naive_qwen3-max
 ```
 
 > 📝 **Note**: 

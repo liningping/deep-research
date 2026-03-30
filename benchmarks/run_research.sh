@@ -48,8 +48,9 @@ for ablation in "${ABLATIONS[@]}"; do
     --benchmark drb \
     --max_concurrent 5 \
     --provider openai \
-    --model "qwen3-max${ABLATION_SUFFIX}" \
-    --max_loops 3
+    --model "qwen3-max" \
+    --max_loops 3 \
+    --direct_generation
 
   # Wait for a short duration between launches if desired, or let them run concurrently
   # sleep 5
