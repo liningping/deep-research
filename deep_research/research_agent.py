@@ -9,6 +9,7 @@ from typing_extensions import Literal
 
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, filter_messages
+from langchain_core.runnables import RunnableConfig
 from langchain.chat_models import init_chat_model
 
 from deep_research.state_research import ResearcherState, ResearcherOutputState
@@ -129,7 +130,9 @@ def compress_research(state: ResearcherState) -> dict:
 
 # ===== ROUTING LOGIC =====
 
-def should_continue(state: ResearcherState) -> Literal["tool_node", "compress_research"]:
+def should_continue(
+    state: ResearcherState, config: RunnableConfig
+) -> Literal["tool_node", "compress_research"]:
     """Determine whether to continue research or provide final answer.
 
     Determines whether the agent should continue the research loop or provide
@@ -142,8 +145,13 @@ def should_continue(state: ResearcherState) -> Literal["tool_node", "compress_re
     messages = state["researcher_messages"]
     last_message = messages[-1]
 
-    # Check hard iteration limit to prevent infinite loops (2 by default)
-    max_loops = int(os.getenv("MAX_AGENT_TOOL_LOOPS", "3"))
+    # Prefer graph configurable over env so limits are not polluted by other code paths.
+    conf = config.get("configurable") or {}
+    raw = conf.get("max_agent_tool_loops")
+    if raw is not None:
+        max_loops = int(raw)
+    else:
+        max_loops = int(os.getenv("MAX_AGENT_TOOL_LOOPS", "3"))
     if state.get("tool_call_iterations", 0) >= max_loops:
         logger.warning(f"Research agent reached max tool call limit ({max_loops}). Forcing to compress_research.")
         return "compress_research"

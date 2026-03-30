@@ -1,0 +1,3 @@
+{"tag": "atl2_wrl3", "max_agent_tool_loops": 2, "max_web_research_loops": 3, "output_dir": "/home/lnp/deep-research/benchmarks/ablation_loop_runs/atl2_wrl3", "model_name": "ablation_atl2_wrl3", "race_overall": null, "avg_est_tokens": 6652.15, "n_json": 20}
+{"tag": "atl4_wrl3", "max_agent_tool_loops": 4, "max_web_research_loops": 3, "output_dir": "/home/lnp/deep-research/benchmarks/ablation_loop_runs/atl4_wrl3", "model_name": "ablation_atl4_wrl3", "race_overall": null, "avg_est_tokens": 6621.0, "n_json": 19}
+{"tag": "atl5_wrl3", "max_agent_tool_loops": 5, "max_web_research_loops": 3, "output_dir": "/home/lnp/deep-research/benchmarks/ablation_loop_runs/atl5_wrl3", "model_name": "ablation_atl5_wrl3", "race_overall": null, "avg_est_tokens": 6740.35, "n_json": 20}

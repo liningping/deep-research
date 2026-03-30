@@ -89,24 +89,39 @@ python run_research_concurrent.py \
 
 > 💡 **Tip**: Add `--collect-traj` to save detailed execution traces for debugging or analysis.
 
-**Step 2: Convert to benchmark format**
+> ✅ **Step 2 is built into Step 1**: After a DRB batch finishes, `run_research_concurrent.py` automatically runs `process_drb.py`, writing `deep_research_bench/data/test_data/raw_data/<name>.jsonl`. Default `<name>` is `edr_<sanitized --model>` (e.g. `gemini-2.5-pro` → `edr_gemini-2.5-pro`). Override with `--drb-jsonl-name my_run`. Skip with `--no-process-drb`.
+
+**Step 2 (optional): Convert manually** — only if you used `--no-process-drb`, an old output folder, or need a custom JSONL name:
 ```bash
 python process_drb.py \
   --input-dir deep_research_bench/results/edr_reports_qwen3-max \
   --model-name edr_qwen3-max
 ```
 
-> 📝 **Note**: 
-> - The processed report will be saved to `deep_research_bench/data/test_data/raw_data/edr_gemini.jsonl`
-> - Add your model name (eg. `edr_gemini`) to `TARGET_MODELS` in `run_benchmark.sh` inside `deep_research_bench`
+> 📝 **Note**: Run from `benchmarks/`. Add the same `<model-name>` (JSONL stem) to `TARGET_MODELS` in `deep_research_bench/run_benchmark.sh` when using their shell driver.
 
 **Step 3: Run DeepResearchBench evaluation**
 ```bash
 cd deep_research_bench
-# Set up Gemini and Jina API keys for LLM evaluation and web scraping 
-export GEMINI_API_KEY="your_gemini_api_key_here"
+# Jina（网页抓取，清洗引用等）
 export JINA_API_KEY="your_jina_api_key_here"
 bash run_benchmark.sh
+```
+
+**RACE / `deepresearch_bench_race.py` 打分模型（`utils/api.py`）** 有两种方式：
+
+| 方式 | 环境变量 | 说明 |
+|------|----------|------|
+| **OpenAI 兼容网关**（默认） | `OPENAI_API_KEY`、`OPENAI_BASE_URL`（可选） | 走 `chat.completions`，模型名由网关决定（如 `gemini-2.5-pro-preview-06-05`）。 |
+| **Google 官方 GenAI** | `DRB_EVAL_BACKEND=google_genai` + `GOOGLE_API_KEY`（或 `GEMINI_API_KEY`） | 使用 `pip install google-genai`，直连 [Google AI Studio](https://aistudio.google.com/apikey) 官方 API。可选：`DRB_EVAL_MODEL`（默认 `gemini-2.5-pro`）、`DRB_FACT_MODEL`（默认 `gemini-2.5-flash`）。 |
+
+示例（官方 GenAI）：
+```bash
+cd benchmarks/deep_research_bench
+export DRB_EVAL_BACKEND=google_genai
+export GOOGLE_API_KEY="your_key_from_ai_studio"
+export JINA_API_KEY="..."
+python deepresearch_bench_race.py your_model_jsonl_stem --output_dir results/race/your_run
 ```
 
 > 🎉 **Results**: The evaluation results will be written to `deep_research_bench/results/`

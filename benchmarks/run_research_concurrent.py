@@ -6,6 +6,8 @@ Multi-threaded research script for benchmarking.
 import asyncio
 import argparse
 import os
+import re
+import subprocess
 import sys
 import json
 import time
@@ -225,15 +227,18 @@ class DRBDatasetManager(BenchmarkDatasetManager):
 
     def format_result(self, task_data: Dict, result_data: Dict) -> Dict:
         """Format result for DRB."""
+        metadata = {
+            "timing": result_data["timing"],
+            "debug_info": result_data["debug_info"],
+            "content_stats": result_data["content_stats"],
+        }
+        if result_data.get("loop_limits"):
+            metadata["loop_limits"] = result_data["loop_limits"]
         return {
             "id": result_data["id"],
             "prompt": result_data["query"],  # DRB uses "prompt" not "query"
             "article": result_data["article"],
-            "metadata": {
-                "timing": result_data["timing"],
-                "debug_info": result_data["debug_info"],
-                "content_stats": result_data["content_stats"],
-            },
+            "metadata": metadata,
         }
 
     def get_output_filename(self, task_id: str) -> str:
@@ -560,18 +565,19 @@ async def run_single_research_task_with_trajectory(
         recorder.query = original_query  # Use original query for recorder
 
     try:
-        from deep_research.research_agent_full import agent as fresh_graph
-        from langchain_core.messages import HumanMessage
-
         if not provider:
             provider = os.environ.get("LLM_PROVIDER", "openai")
         if not model:
             model = os.environ.get("LLM_MODEL", "o3-mini")
 
-        # Set environment variables (match working version)
-        os.environ["MAX_WEB_RESEARCH_LOOPS"] = str(max_web_search_loops)
+        # Loop limits: only in graph config (not os.environ) so .env / other tasks cannot override.
+        max_agent_tool_loops = int(os.getenv("MAX_AGENT_TOOL_LOOPS", "3"))
+
         os.environ["LLM_PROVIDER"] = provider
         os.environ["LLM_MODEL"] = model
+
+        from deep_research.research_agent_full import agent as fresh_graph
+        from langchain_core.messages import HumanMessage
 
         if isinstance(dataset_manager, DeepConsultDatasetManager):
             benchmark_type = "DEEPCONSULT"
@@ -591,6 +597,7 @@ async def run_single_research_task_with_trajectory(
                 "llm_provider": provider,
                 "llm_model": model,
                 "max_web_research_loops": max_web_search_loops,
+                "max_agent_tool_loops": max_agent_tool_loops,
                 "user_prompt": query,
             },
             "recursion_limit": 100,
@@ -890,6 +897,10 @@ async def run_single_research_task_with_trajectory(
                 "final_content_length": len(final_content.split()),
                 "final_summary_length": len(final_summary.split()),
             },
+            "loop_limits": {
+                "max_web_research_loops": max_web_search_loops,
+                "max_agent_tool_loops": max_agent_tool_loops,
+            },
         }
 
         # Format and save result
@@ -1115,6 +1126,42 @@ async def process_tasks_concurrently(
 
 
 # ==================== Helper Functions ====================
+def _drb_jsonl_stem_from_model(model: str) -> str:
+    """Basename for deep_research_bench/data/test_data/raw_data/<stem>.jsonl (README edr_* 风格)."""
+    s = re.sub(r"[^a-zA-Z0-9._-]+", "_", model.strip()).strip("_")
+    if not s:
+        s = "model"
+    if not s.startswith("edr_"):
+        s = f"edr_{s}"
+    return s
+
+
+def run_process_drb_after_drb(benchmarks_dir: Path, output_dir: str, model_name: str) -> int:
+    """合并 output_dir 下各题 JSON -> raw_data/<model_name>.jsonl（与手动执行 process_drb.py 等价）。"""
+    script = benchmarks_dir / "process_drb.py"
+    if not script.is_file():
+        logger.error("process_drb.py not found at %s", script)
+        return 1
+    cmd = [
+        sys.executable,
+        str(script),
+        "--input-dir",
+        output_dir,
+        "--model-name",
+        model_name,
+    ]
+    logger.info("Running DRB post-process: %s", " ".join(cmd))
+    r = subprocess.run(cmd, cwd=str(benchmarks_dir))
+    if r.returncode != 0:
+        logger.error("process_drb.py exited with code %s", r.returncode)
+    else:
+        logger.info(
+            "DRB raw JSONL written to deep_research_bench/data/test_data/raw_data/%s.jsonl",
+            model_name,
+        )
+    return r.returncode
+
+
 def get_default_file_paths(benchmark_type: str, model_name: str = 'gemini') -> Dict[str, str]:
     """Get default file paths for different benchmarks."""
     # Script directory (benchmarks repos should be cloned here)
@@ -1232,6 +1279,17 @@ def main():
         "--save_md",
         action="store_true",
         help="Save markdown report as .md file immediately after generation",
+    )
+    parser.add_argument(
+        "--no-process-drb",
+        action="store_true",
+        help="DRB only: do not run process_drb.py after a successful batch (default: run it).",
+    )
+    parser.add_argument(
+        "--drb-jsonl-name",
+        type=str,
+        default=None,
+        help="DRB only: basename for raw_data/<name>.jsonl (default: edr_<sanitized --model>).",
     )
 
     args = parser.parse_args()
@@ -1372,6 +1430,20 @@ def main():
     logger.info(f"Total duration: {total_duration:.2f}s")
     logger.info(f"Average time per task: {total_duration / len(tasks):.2f}s")
     logger.info("=" * 60)
+
+    if args.benchmark == "drb" and not args.no_process_drb:
+        if len(successful_results) < 1:
+            logger.warning(
+                "Skipping DRB post-process (process_drb): no successful tasks in this run; "
+                "output dir may only contain error_*.json / run_config.json."
+            )
+        else:
+            jsonl_stem = args.drb_jsonl_name or _drb_jsonl_stem_from_model(args.model)
+            rc = run_process_drb_after_drb(
+                Path(__file__).resolve().parent, output_dir, jsonl_stem
+            )
+            if rc != 0:
+                sys.exit(rc)
 
 
 if __name__ == "__main__":

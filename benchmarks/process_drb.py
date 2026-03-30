@@ -6,9 +6,21 @@ Usage:
     python process_drb.py --input-dir /path/to/json/files --model-name your_model_name
 """
 
+import argparse
 import json
 import os
-import argparse
+import re
+
+# DRB 成功报告文件名为 "{id}.json"（整数 id），排除 run_config、error_*、trajectory_* 等
+_DRB_REPORT_NAME = re.compile(r"^\d+\.json$")
+
+
+def _list_drb_report_files(input_dir: str) -> list[str]:
+    return sorted(
+        f
+        for f in os.listdir(input_dir)
+        if f.endswith(".json") and _DRB_REPORT_NAME.match(f)
+    )
 
 
 def main():
@@ -40,14 +52,16 @@ def main():
         print(f"Error: Input directory '{args.input_dir}' does not exist")
         return 1
 
-    # Collect all JSON files in the directory
-    json_files = [f for f in os.listdir(args.input_dir) if f.endswith(".json")]
+    json_files = _list_drb_report_files(args.input_dir)
 
     if not json_files:
-        print(f"Error: No JSON files found in '{args.input_dir}'")
+        print(
+            f"Error: No DRB report JSON files matching '{{id}}.json' in '{args.input_dir}' "
+            f"(ignored: run_config.json, error_*.json, trajectory_*.json, etc.)"
+        )
         return 1
 
-    print(f"Found {len(json_files)} JSON files in '{args.input_dir}'")
+    print(f"Found {len(json_files)} DRB report file(s) in '{args.input_dir}'")
 
     all_reports = []
     for file in json_files:
